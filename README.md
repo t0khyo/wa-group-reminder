@@ -43,29 +43,70 @@ Reminder created ✅
 1. Clone the repository
 
 ```bash
-   git clone https://github.com/t0khyo/wa-group-reminder.git
-   cd wa-group-reminder
+git clone https://github.com/t0khyo/wa-group-reminder.git
+cd wa-group-reminder
 ```
 
 2. Install dependencies
 
 ```bash
-   npm install
+npm install
 ```
 
 3. Start the bot
 
 ```bash
-   npm start
+npm start
 ```
 
 4. Scan QR code
 
-  A QR code will appear in your terminal
-  Open WhatsApp on your phone
-  Go to Settings → Linked Devices → Link a Device
-  Scan the QR code
+   A QR code will appear in your terminal
+Open WhatsApp on your phone
+Go to `Settings → Linked Devices → Link a Device
+Scan the QR code`
 
 Done! The bot is now active in all your groups
 
+## Usage
+
+### Creating Reminders
+
+**Format 1 (Recommended):**
+```
+@bot
+Meeting title here
+tomorrow at 3pm
+```
+
+**Format 2 (Single-line):**
+```
+@bot Meeting title tomorrow at 3pm
+```
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `@bot list` | Show all your active reminders |
+| `@bot cancel` | Cancel your most recent reminder |
+| `@bot help` | Display help message |
+
+### Examples
+
+```
+@bot
+Client call with John
+Monday 9am
+
+@bot
+Team standup
+next Friday at 10:30am
+
+@bot Project deadline December 25 at 11:59pm
+
+@bot Quick sync in 2 hours
+```
+
+## Database Schema
 
