@@ -108,5 +108,21 @@ next Friday at 10:30am
 @bot Quick sync in 2 hours
 ```
 
-## Database Schema
+## 🛠️ Technology Stack
 
+| Technology | Purpose |
+|------------|---------|
+| [Node.js](https://nodejs.org/) | Runtime environment |
+| [Baileys](https://github.com/WhiskeySockets/Baileys) | WhatsApp Web API |
+| [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) | SQLite database |
+| [chrono-node](https://github.com/wanasit/chrono) | Natural language date parsing |
+| [qrcode-terminal](https://github.com/gtanner/qrcode-terminal) | QR code display |
+
+## ⚠️ Known Limitations
+
+- Uses unofficial WhatsApp Web API (may break with WhatsApp updates)
+- Bot occupies one device slot in your WhatsApp account
+- Cannot read messages sent before bot joined group
+- Rate limiting applies (avoid sending too many messages)
+
+**Disclaimer**: This is not an official WhatsApp product. Use at your own risk. WhatsApp may ban accounts that use unofficial clients.
