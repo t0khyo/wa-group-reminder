@@ -3,6 +3,7 @@
 A smart WhatsApp bot that creates and manages meeting reminders when mentioned in group chats. Built with Node.js and Baileys.
 
 ## Features
+
 - **Mention-Triggered** - Only responds when explicitly mentioned with @bot
 - **Natural Language Parsing** - Understands dates like "tomorrow 3pm", "next Monday 9am"
 - **Dual Notifications** - Sends reminders 24 hours and 1 hour before meetings
@@ -11,15 +12,17 @@ A smart WhatsApp bot that creates and manages meeting reminders when mentioned i
 
 ## Creating a Reminder
 
-User: 
-```
+User:
+
+```txt
 @bot
 Team standup
 tomorrow at 3pm
 ```
 
-Bot: 
-```
+Bot:
+
+```txt
 Reminder created ✅
 
 📌 Team standup
@@ -32,13 +35,13 @@ Reminder created ✅
 
 ## Quick Start 🚀
 
-### Prerequisites:
+### Prerequisites
 
 - Node.js 16.x or higher
 - npm
 - A WhatsApp account
 
-### Installation:
+### Installation
 
 1. Clone the repository
 
@@ -62,8 +65,8 @@ npm start
 4. Scan QR code
 
    A QR code will appear in your terminal
-Open WhatsApp on your phone
-Go to `Settings → Linked Devices → Link a Device
+   Open WhatsApp on your phone
+   Go to `Settings → Linked Devices → Link a Device
 Scan the QR code`
 
 Done! The bot is now active in all your groups
@@ -73,6 +76,7 @@ Done! The bot is now active in all your groups
 ### Creating Reminders
 
 **Format 1 (Recommended):**
+
 ```
 @bot
 Meeting title here
@@ -80,17 +84,18 @@ tomorrow at 3pm
 ```
 
 **Format 2 (Single-line):**
+
 ```
 @bot Meeting title tomorrow at 3pm
 ```
 
 ### Commands
 
-| Command | Description |
-|---------|-------------|
-| `@bot list` | Show all your active reminders |
+| Command       | Description                      |
+| ------------- | -------------------------------- |
+| `@bot list`   | Show all your active reminders   |
 | `@bot cancel` | Cancel your most recent reminder |
-| `@bot help` | Display help message |
+| `@bot help`   | Display help message             |
 
 ### Examples
 
@@ -110,15 +115,19 @@ next Friday at 10:30am
 
 ## 🛠️ Technology Stack
 
-| Technology | Purpose |
-|------------|---------|
-| [Node.js](https://nodejs.org/) | Runtime environment |
-| [Baileys](https://github.com/WhiskeySockets/Baileys) | WhatsApp Web API |
-| [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) | SQLite database |
-| [chrono-node](https://github.com/wanasit/chrono) | Natural language date parsing |
-| [qrcode-terminal](https://github.com/gtanner/qrcode-terminal) | QR code display |
+| Technology                                                    | Purpose                       |
+| ------------------------------------------------------------- | ----------------------------- |
+| [Node.js](https://nodejs.org/)                                | Runtime environment           |
+| [Baileys](https://github.com/WhiskeySockets/Baileys)          | WhatsApp Web API              |
+| [better-sqlite3](https://github.com/WiseLibs/better-sqlite3)  | SQLite database               |
+| [chrono-node](https://github.com/wanasit/chrono)              | Natural language date parsing |
+| [qrcode-terminal](https://github.com/gtanner/qrcode-terminal) | QR code display               |
 
-## ⚠️ Known Limitations
+## Database Schema
+
+![ERD](./assets/reminder-db.png)
+
+## ⚠️ Limitations
 
 - Uses unofficial WhatsApp Web API (may break with WhatsApp updates)
 - Bot occupies one device slot in your WhatsApp account
