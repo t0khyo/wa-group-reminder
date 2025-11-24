@@ -116,7 +116,7 @@ class ReminderService {
     const message = `Reminder created ✅
 
 📌 ${parsed.title}
-⏳ ${formattedDateTime}
+🕒 ${formattedDateTime}
 
 🔔 You'll receive reminders:
 - 24 hours before
@@ -231,12 +231,13 @@ Project kickoff
 
       const message = `Reminder: Tomorrow! ⏰
 
-📌 ${reminder.title}
-⏳ ${formatted}`;
+📌 *Title:* ${reminder.title}  
+🕒 *Time:* ${formatted}
+> @${reminder.sender_id.split("@")[0]}`;
 
       await this.sock.sendMessage(reminder.group_id, {
         text: message,
-        mentions: [reminder.senderId],
+        mentions: [reminder.sender_id],
       });
       db.mark24hSent(reminder.id);
 
