@@ -119,7 +119,7 @@ export class WhatsappService {
       logger.info(`Bot was NOT mentioned in chat ${chatId} by ${senderId}`);
     }
 
-    if (text.includes("ping")) {
+    if (text.includes("/ping")) {
       await this.sendMessage(chatId, { text: "pong 🏓" });
       logger.info(`Replied with pong to chat ${chatId}`);
     }
