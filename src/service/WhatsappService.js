@@ -12,41 +12,31 @@ dotenv.config();
 export class WhatsappService {
   constructor() {
     this.webSocket = null;
-    this.started = false;
-
     this.botName = null;
     this.botJid = null;
     this.botLid = null;
   }
 
-  // idempotent start
   async start(authPath = "./auth_info") {
-    if (this.started) {
-      logger.info("WaService already started, returning existing socket");
-      return this.sock;
-    }
-    if (this.starting) {
-      logger.info("WaService start already in progress, please wait");
-      return this.sock;
-    }
-
-    this.starting = true;
     this.authPath = authPath;
 
     try {
       const { state, saveCreds } = await useMultiFileAuthState(this.authPath);
 
-      this.sock = makeWASocket({ auth: state });
+      this.webSocket = makeWASocket({ auth: state });
 
       // persist creds
-      this.sock.ev.on("creds.update", saveCreds);
+      this.webSocket.ev.on("creds.update", saveCreds);
 
       // internal handlers
-      this.sock.ev.on("connection.update", this.handleConnection.bind(this));
-      this.sock.ev.on("messages.upsert", this.handleMessages.bind(this));
+      this.webSocket.ev.on(
+        "connection.update",
+        this.handleConnection.bind(this)
+      );
+      this.webSocket.ev.on("messages.upsert", this.handleMessages.bind(this));
 
       // auto-detect bot IDs from creds
-      this.sock.ev.on("creds.update", (creds) => {
+      this.webSocket.ev.on("creds.update", (creds) => {
         if (!creds?.me) return;
 
         const rawId = creds.me.jid || "";
@@ -63,11 +53,8 @@ export class WhatsappService {
         logger.info(`Bot name set: ${this.botName}`);
       });
 
-      this.starting = false;
-      this.started = true;
       return this.sock;
     } catch (err) {
-      this.starting = false;
       logger.error("WaService failed to start:", err?.message || err);
       throw err;
     }
@@ -102,7 +89,7 @@ export class WhatsappService {
 
     // Connection opened
     if (connection === "open") {
-      this.botId = this.webSocket.user.id;
+      this.botId = this.webSocket.user.jid;
       logger.info("Connected to WhatsApp successfully 🚀");
       logger.info(
         `Bot LID: ${this.botLid}, JID: ${this.botJid}, Name: ${this.botName}`
@@ -132,6 +119,11 @@ export class WhatsappService {
       logger.info(`Bot was NOT mentioned in chat ${chatId} by ${senderId}`);
     }
 
+    if (text.includes("ping")) {
+      await this.sendMessage(chatId, { text: "pong 🏓" });
+      logger.info(`Replied with pong to chat ${chatId}`);
+    }
+
     const mentionedJids =
       msg.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
     if (mentionedJids.length > 0) {
@@ -142,7 +134,7 @@ export class WhatsappService {
 
     // Pass message to AI service if needed
     // const aiResponse = await aiParseAndAct(chatId, senderId, text);
-    // if (aiResponse) await this.sock.sendMessage(chatId, { text: aiResponse });
+    // if (aiResponse) await this.webSocket.sendMessage(chatId, { text: aiResponse });
   }
 
   extractText(message) {
@@ -158,5 +150,9 @@ export class WhatsappService {
       mentionedJids.includes(this.botJid) ||
       mentionedJids.includes(this.botLid);
     return mentioned;
+  }
+
+  sendMessage(chatId, content) {
+    return this.webSocket.sendMessage(chatId, content);
   }
 }
