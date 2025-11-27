@@ -1,9 +1,11 @@
+import { ListenerService } from "./service/listenerService.js";
 import ReminderService from "./service/reminderService.js";
+import logger from "./utils/logger.js";
 
-console.log("Starting WhatsApp Bot...");
-const service = new ReminderService();
+logger.info("Starting WhatsApp Bot...");
+const service = new ListenerService();
 
 service.start().catch((err) => {
-  console.error("Failed to start bot:", err);
+  logger.error("Failed to start bot:", err);
   process.exit(1);
 });
