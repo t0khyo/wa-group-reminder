@@ -1,11 +1,12 @@
-import { ListenerService } from "./service/listenerService.js";
-import ReminderService from "./service/reminderService.js";
+import { whatsappService } from "./service/WhatsappService.js";
 import logger from "./utils/logger.js";
 
-logger.info("Starting WhatsApp Bot...");
-const service = new ListenerService();
+async function main() {
+  logger.info("Starting WhatsApp Bot...");
+  await whatsappService.start().catch((err) => {
+    logger.error("Failed to start bot:", err);
+    process.exit(1);
+  });
+}
 
-service.start().catch((err) => {
-  logger.error("Failed to start bot:", err);
-  process.exit(1);
-});
+main();

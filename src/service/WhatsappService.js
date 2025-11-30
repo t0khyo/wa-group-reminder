@@ -4,48 +4,59 @@ import makeWASocket, {
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import qrcode from "qrcode-terminal";
-// import { aiParseAndAct } from "../modules/ai.js";
 import logger from "../utils/logger.js";
-import dotenv from "dotenv";
-dotenv.config();
+import { AiService } from "./aiService.js";
 
-export class ListenerService {
+class WhatsappService {
   constructor() {
     this.webSocket = null;
     this.botName = null;
     this.botJid = null;
     this.botLid = null;
+    this.aiService = new AiService();
   }
 
   async start(authPath = "./auth_info") {
-    const { state, saveCreds } = await useMultiFileAuthState(authPath);
-    this.webSocket = makeWASocket({ auth: state });
+    this.authPath = authPath;
 
-    this.webSocket.ev.on("creds.update", saveCreds);
-    this.webSocket.ev.on("connection.update", this.handleConnection.bind(this));
-    this.webSocket.ev.on("messages.upsert", this.handleMessages.bind(this));
+    try {
+      const { state, saveCreds } = await useMultiFileAuthState(this.authPath);
 
-    // this.webSocket.ev.process(async (events) => {
-    //   logger.info("RAW EVENT:");
-    //   logger.info(JSON.stringify(events, null, 2));
-    // });
+      this.webSocket = makeWASocket({ auth: state });
 
-    this.webSocket.ev.on("creds.update", (creds) => {
-      if (creds.me) {
-        const rawId = creds.me.id;
-        const rawLid = creds.me.lid;
-        const botName = creds.me.name || "Gigi";
+      // persist creds
+      this.webSocket.ev.on("creds.update", saveCreds);
 
-        // Normalize (remove :<deviceId>)
+      // internal handlers
+      this.webSocket.ev.on(
+        "connection.update",
+        this.handleConnection.bind(this)
+      );
+      this.webSocket.ev.on("messages.upsert", this.handleMessages.bind(this));
+
+      // auto-detect bot IDs from creds
+      this.webSocket.ev.on("creds.update", (creds) => {
+        if (!creds?.me) return;
+
+        const rawId = creds.me.jid || "";
+        const rawLid = creds.me.id || "";
+        const name = creds.me.name || this.botName || "Gigi";
+
+        // normalize by removing :<deviceIndex>
         this.botJid = rawId.replace(/:\d+@/, "@");
         this.botLid = rawLid.replace(/:\d+@/, "@");
+        this.botName = name;
 
-        this.botName = botName;
         logger.info(`Bot JID set: ${this.botJid}`);
         logger.info(`Bot LID set: ${this.botLid}`);
         logger.info(`Bot name set: ${this.botName}`);
-      }
-    });
+      });
+
+      return this.sock;
+    } catch (err) {
+      logger.error("WaService failed to start:", err?.message || err);
+      throw err;
+    }
   }
 
   handleConnection(update) {
@@ -77,7 +88,7 @@ export class ListenerService {
 
     // Connection opened
     if (connection === "open") {
-      this.botId = this.webSocket.user.id;
+      this.botId = this.webSocket.user.jid;
       logger.info("Connected to WhatsApp successfully 🚀");
       logger.info(
         `Bot LID: ${this.botLid}, JID: ${this.botJid}, Name: ${this.botName}`
@@ -98,26 +109,31 @@ export class ListenerService {
     const senderId = msg.key.participant || chatId;
 
     const text = this.extractText(msg.message);
-    logger.info(`Extracted message text: "${text}"`);
+    logger.info(
+      `Incoming message from: ${senderId}, chat: ${chatId}, Extracted message text:'${text}'`
+    );
+
+    if (text.includes("/ping")) {
+      await this.sendMessage(chatId, { text: "pong 🏓" });
+      logger.info(`Replied with pong 🏓 to chat ${chatId}`);
+      return;
+    }
 
     const mentioned = this.isBotMentioned(msg);
-    if (mentioned) {
-      logger.info(`Bot was mentioned in chat ${chatId} by ${senderId}`);
-    } else {
-      logger.info(`Bot was NOT mentioned in chat ${chatId} by ${senderId}`);
+    if (!mentioned) {
+      logger.info(`Bot wasn't mentioned skipping message.`);
+      return;
     }
 
     const mentionedJids =
       msg.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
     if (mentionedJids.length > 0) {
-      logger.info(
-        `Mentioned JIDs in this message: ${mentionedJids.join(", ")}`
-      );
+      logger.info(`Mentioned JIDs in this message: ${mentionedJids}`);
     }
 
-    // Pass message to AI service if needed
-    // const aiResponse = await aiParseAndAct(chatId, senderId, text);
-    // if (aiResponse) await this.sock.sendMessage(chatId, { text: aiResponse });
+    const reply = await this.aiService.generateReply(text);
+    await this.sendMessage(chatId, { text: reply });
+    logger.info(`Sent AI-generated reply to chat ${chatId}`);
   }
 
   extractText(message) {
@@ -129,9 +145,16 @@ export class ListenerService {
   isBotMentioned(message) {
     const mentionedJids =
       message.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
+    logger.info(`Mentioned JIDs in this message: ${mentionedJids}`);
     const mentioned =
       mentionedJids.includes(this.botJid) ||
       mentionedJids.includes(this.botLid);
     return mentioned;
   }
+
+  sendMessage(chatId, content) {
+    return this.webSocket.sendMessage(chatId, content);
+  }
 }
+
+export const whatsappService = new WhatsappService();

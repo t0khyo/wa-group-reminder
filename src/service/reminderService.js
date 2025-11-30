@@ -6,6 +6,8 @@ import { Boom } from "@hapi/boom";
 import qrcode from "qrcode-terminal";
 import db from "../db/database.js";
 import MessageParser from "../utils/parser.js";
+import OpenAI from "openai";
+import dotenv from "dotenv";
 
 class ReminderService {
   constructor() {
@@ -15,6 +17,39 @@ class ReminderService {
       checkIntervalSeconds: 30,
       authPath: "./auth_info",
     };
+
+    dotenv.config();
+
+    const openaiKey = process.env.OPENAI_API_KEY;
+    if (!openaiKey) {
+      console.warn("Warning: OPENAI_API_KEY not set — AI replies disabled.");
+      this.openai = null;
+    } else {
+      this.openai = new OpenAI({ apiKey: openaiKey });
+    }
+  }
+
+  // NEW: Very small helper that asks OpenAI for a one-line reply
+  async aiOneLineReply(userMessage) {
+    // defensive: ensure client exists
+    if (!this.openai) throw new Error("OpenAI client not configured");
+
+    const system = `You are a concise WhatsApp assistant. Reply in exactly one short line, no line breaks. Be helpful and friendly.`;
+    const user = `User: ${userMessage}`;
+
+    const resp = await this.openai.chat.completions.create({
+      model: "gpt-4o-mini", // change model if desired
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      max_tokens: 64,
+      temperature: 0.0,
+    });
+
+    const content = resp?.choices?.[0]?.message?.content ?? "";
+    // flatten to one line and trim
+    return content.replace(/\s*\n+\s*/g, " ").trim();
   }
 
   async start() {
@@ -82,15 +117,40 @@ class ReminderService {
 
     const lowerText = text.toLowerCase();
 
-    if (lowerText.includes("cancel")) {
-      await this.handleCancel(chatId, senderId);
-    } else if (lowerText.includes("list")) {
-      await this.handleList(chatId, senderId);
-    } else if (lowerText.includes("help")) {
-      await this.handleHelp(chatId);
-    } else {
-      await this.handleCreateReminder(chatId, senderId, text);
+    // NEW: If user starts message body with "ai " -> use OpenAI one-line reply
+    // Example: "@bot ai what's the plan for tomorrow?"
+    if (lowerText.includes("ai ")) {
+      if (!this.openai) {
+        await this.sock.sendMessage(chatId, {
+          text: "AI reply is disabled (OPENAI_API_KEY not set).",
+        });
+        return;
+      }
+      try {
+        const userMessage = text
+          .slice(text.toLowerCase().indexOf("ai ") + 3)
+          .trim();
+        const aiReply = await this.aiOneLineReply(userMessage);
+        await this.sock.sendMessage(chatId, { text: aiReply });
+      } catch (err) {
+        console.error("AI reply error:", err);
+        await this.sock.sendMessage(chatId, {
+          text: "Sorry, I couldn't process that with AI right now.",
+        });
+      }
+      console.log("");
+      return; // do not run regular reminder logic for this message
     }
+
+    // if (lowerText.includes("cancel")) {
+    //   await this.handleCancel(chatId, senderId);
+    // } else if (lowerText.includes("list")) {
+    //   await this.handleList(chatId, senderId);
+    // } else if (lowerText.includes("help")) {
+    //   await this.handleHelp(chatId);
+    // } else {
+    //   await this.handleCreateReminder(chatId, senderId, text);
+    // }
 
     console.log("");
   }
