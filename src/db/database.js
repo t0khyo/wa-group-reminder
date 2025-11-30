@@ -1,7 +1,7 @@
 // src/db/database.js (ES module)
 import Database from 'better-sqlite3';
 import path from 'path';
-import fs from 'fs';
+import fs, { link } from 'fs';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);

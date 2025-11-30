@@ -4,17 +4,16 @@ import makeWASocket, {
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import qrcode from "qrcode-terminal";
-// import { aiParseAndAct } from "../modules/ai.js";
 import logger from "../utils/logger.js";
-import dotenv from "dotenv";
-dotenv.config();
+import { AiService } from "./aiService.js";
 
-export class WhatsappService {
+class WhatsappService {
   constructor() {
     this.webSocket = null;
     this.botName = null;
     this.botJid = null;
     this.botLid = null;
+    this.aiService = new AiService();
   }
 
   async start(authPath = "./auth_info") {
@@ -40,7 +39,7 @@ export class WhatsappService {
         if (!creds?.me) return;
 
         const rawId = creds.me.jid || "";
-        const rawLid = creds.me.lid || "";
+        const rawLid = creds.me.id || "";
         const name = creds.me.name || this.botName || "Gigi";
 
         // normalize by removing :<deviceIndex>
@@ -110,31 +109,31 @@ export class WhatsappService {
     const senderId = msg.key.participant || chatId;
 
     const text = this.extractText(msg.message);
-    logger.info(`Extracted message text: "${text}"`);
-
-    const mentioned = this.isBotMentioned(msg);
-    if (mentioned) {
-      logger.info(`Bot was mentioned in chat ${chatId} by ${senderId}`);
-    } else {
-      logger.info(`Bot was NOT mentioned in chat ${chatId} by ${senderId}`);
-    }
+    logger.info(
+      `Incoming message from: ${senderId}, chat: ${chatId}, Extracted message text:'${text}'`
+    );
 
     if (text.includes("/ping")) {
       await this.sendMessage(chatId, { text: "pong 🏓" });
-      logger.info(`Replied with pong to chat ${chatId}`);
+      logger.info(`Replied with pong 🏓 to chat ${chatId}`);
+      return;
+    }
+
+    const mentioned = this.isBotMentioned(msg);
+    if (!mentioned) {
+      logger.info(`Bot wasn't mentioned skipping message.`);
+      return;
     }
 
     const mentionedJids =
       msg.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
     if (mentionedJids.length > 0) {
-      logger.info(
-        `Mentioned JIDs in this message: ${mentionedJids.join(", ")}`
-      );
+      logger.info(`Mentioned JIDs in this message: ${mentionedJids}`);
     }
 
-    // Pass message to AI service if needed
-    // const aiResponse = await aiParseAndAct(chatId, senderId, text);
-    // if (aiResponse) await this.webSocket.sendMessage(chatId, { text: aiResponse });
+    const reply = await this.aiService.generateReply(text);
+    await this.sendMessage(chatId, { text: reply });
+    logger.info(`Sent AI-generated reply to chat ${chatId}`);
   }
 
   extractText(message) {
@@ -146,6 +145,7 @@ export class WhatsappService {
   isBotMentioned(message) {
     const mentionedJids =
       message.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
+    logger.info(`Mentioned JIDs in this message: ${mentionedJids}`);
     const mentioned =
       mentionedJids.includes(this.botJid) ||
       mentionedJids.includes(this.botLid);
@@ -156,3 +156,5 @@ export class WhatsappService {
     return this.webSocket.sendMessage(chatId, content);
   }
 }
+
+export const whatsappService = new WhatsappService();
