@@ -148,10 +148,10 @@ export class WhatsappService {
 
     // Display QR code for pairing
     if (qr) {
-      logger.info("📱 QR Code generated. Please scan with WhatsApp:");
+      logger.info("QR Code generated. Please scan with WhatsApp:");
       qrcode.generate(qr, { small: true });
       logger.info(
-        "💡 Go to: WhatsApp → Settings → Linked Devices → Link a Device"
+        "Go to: WhatsApp → Settings → Linked Devices → Link a Device"
       );
     }
 
@@ -251,7 +251,7 @@ export class WhatsappService {
     const context = this.extractMessageContext(msg);
 
     logger.info(
-      `📨 Message from ${context.senderId} in ${context.chatId}${
+      `Message from ${context.senderId} in ${context.chatId}${
         context.isGroup ? " (group)" : ""
       }`
     );
@@ -260,7 +260,7 @@ export class WhatsappService {
     // Check if this is a reply to bot's message
     const isReplyToBot = this.isBotRepliedTo(msg);
     if (isReplyToBot) {
-      logger.info("💬 User replied to bot's message");
+      logger.info("User replied to bot's message");
     }
 
     // Handle ping command
@@ -497,5 +497,4 @@ export class WhatsappService {
   }
 }
 
-// Export as class (not singleton) for better testability
 export default WhatsappService;
