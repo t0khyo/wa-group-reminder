@@ -2,222 +2,500 @@ import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
   WASocket,
+  WAMessage,
+  proto,
+  AuthenticationState,
+  ConnectionState,
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import qrcode from "qrcode-terminal";
 import logger from "../utils/logger.js";
-import { AiService } from "../service/AiService.js";
+import { AiService } from "./AiService.js";
+import { RateLimiter } from "../utils/RateLimiter.js";
 
-type MessageContent = {
+// Type definitions
+interface MessageContent {
   text?: string;
   [key: string]: any;
-};
+}
 
-type IncomingMessage = {
-  key: {
-    remoteJid?: string;
-    participant?: string;
+interface BotIdentity {
+  jid: string | null;
+  lid: string | null;
+  name: string;
+  phoneNumber?: string;
+}
+
+interface MessageContext {
+  chatId: string;
+  senderId: string;
+  isGroup: boolean;
+  text: string;
+  rawText: string;
+  quotedMessage?: proto.IMessage;
+  mentionedJids: string[];
+}
+
+export class WhatsappService {
+  private socket: WASocket | null = null;
+  private botIdentity: BotIdentity = {
+    jid: null,
+    lid: null,
+    name: "Gigi",
   };
-  message?: any;
-};
-
-class WhatsappService {
-  private webSocket: WASocket | null = null;
-  private botName: string | null = null;
-  private botJid: string | null | undefined = null;
-  private botLid: string | null = null;
+  private authPath: string;
   private aiService: AiService;
-  private authPath: string = "./auth_info";
+  private rateLimiter: RateLimiter;
+  private isConnected: boolean = false;
+  private reconnectAttempts: number = 0;
+  private readonly MAX_RECONNECT_ATTEMPTS = 5;
+  private readonly RECONNECT_DELAY_MS = 5000;
 
-  constructor() {
-    this.aiService = new AiService();
+  constructor(aiService?: AiService, authPath: string = "./auth_info") {
+    this.aiService = aiService || new AiService();
+    this.authPath = authPath;
+    this.rateLimiter = new RateLimiter(10, 60000); // 10 messages per minute per user
   }
 
-  async start(authPath = "./auth_info") {
-    this.authPath = authPath;
+  /**
+   * Start the WhatsApp service and establish connection
+   */
+  async start(authPath?: string): Promise<WASocket> {
+    if (authPath) {
+      this.authPath = authPath;
+    }
 
     try {
       const { state, saveCreds } = await useMultiFileAuthState(this.authPath);
 
-      this.webSocket = makeWASocket({ auth: state });
-
-      // persist creds
-      this.webSocket.ev.on("creds.update", saveCreds);
-
-      // internal handlers
-      this.webSocket.ev.on(
-        "connection.update",
-        this.handleConnection.bind(this)
-      );
-
-      this.webSocket.ev.on("messages.upsert", this.handleMessages.bind(this));
-      this.webSocket.ev.on("messages.update", (m) =>
-        logger.info(`Messages updated: ${JSON.stringify(m)}`)
-      );
-
-      this.webSocket.ev.on("messages.upsert", (m) =>
-        logger.info(`Messages upserted: ${JSON.stringify(m)}`)
-      );
-
-      // auto-detect bot IDs from creds
-      this.webSocket.ev.on("creds.update", (creds) => {
-        if (!creds?.me) return;
-
-        const rawJid = creds.me.id || "";
-        const rawLid = creds.me.id || "";
-        const name = creds.me.name || this.botName || "Gigi";
-
-        logger.info(
-          `creds.me detected: ID=${creds.me.id}, LID=${creds.me.lid}, Name=${creds.me.name}, phone=${creds.me.phoneNumber}`
-        );
-
-        // normalize by removing :<deviceIndex>
-        this.botJid = rawJid.replace(/:\d+@/, "@");
-        this.botLid = rawLid.replace(/:\d+@/, "@");
-        this.botName = name;
-
-        logger.info(`Bot JID set: ${this.botJid}`);
-        logger.info(`Bot LID set: ${this.botLid}`);
-        logger.info(`Bot name set: ${this.botName}`);
+      this.socket = makeWASocket({
+        auth: state,
+        printQRInTerminal: false, // We handle QR display manually
+        defaultQueryTimeoutMs: 60000,
       });
 
-      return this.webSocket;
-    } catch (err: any) {
-      logger.error("WaService failed to start:", err?.message || err);
-      throw err;
+      this.setupEventHandlers(saveCreds);
+
+      return this.socket;
+    } catch (error) {
+      logger.error("Failed to start WhatsApp service:", error);
+      throw error;
     }
   }
 
-  handleConnection(update: any) {
+  /**
+   * Setup all event handlers
+   */
+  private setupEventHandlers(saveCreds: () => Promise<void>): void {
+    if (!this.socket) return;
+
+    // Save credentials on update
+    this.socket.ev.on("creds.update", async () => {
+      await saveCreds();
+      this.handleCredsUpdate();
+    });
+
+    // Handle connection state changes
+    this.socket.ev.on(
+      "connection.update",
+      this.handleConnectionUpdate.bind(this)
+    );
+
+    // Handle incoming messages
+    this.socket.ev.on("messages.upsert", this.handleMessagesUpsert.bind(this));
+
+    // Handle message updates (read receipts, edits, etc.)
+    this.socket.ev.on("messages.update", (updates) => {
+      logger.debug("Messages updated:", updates);
+    });
+
+    // Handle group updates
+    this.socket.ev.on("groups.update", (groups) => {
+      logger.debug("Groups updated:", groups);
+    });
+  }
+
+  /**
+   * Handle credentials update to extract bot identity
+   */
+  private handleCredsUpdate(): void {
+    if (!this.socket?.authState?.creds?.me) return;
+
+    const me = this.socket.authState.creds.me;
+
+    // Normalize JID/LID by removing device index
+    const normalizeJid = (jid: string) => jid.replace(/:\d+@/, "@");
+
+    this.botIdentity = {
+      jid: me.id ? normalizeJid(me.id) : null,
+      lid: me.lid ? normalizeJid(me.lid) : null,
+      name: me.name || this.botIdentity.name,
+      phoneNumber: me.phoneNumber,
+    };
+
+    logger.info("Bot identity updated:", {
+      jid: this.botIdentity.jid,
+      lid: this.botIdentity.lid,
+      name: this.botIdentity.name,
+    });
+  }
+
+  /**
+   * Handle connection state updates
+   */
+  private handleConnectionUpdate(update: Partial<ConnectionState>): void {
     const { connection, lastDisconnect, qr } = update;
 
-    // QR Code
+    // Display QR code for pairing
     if (qr) {
-      logger.info("QR code generated. Scan it from WhatsApp mobile app.");
+      logger.info("📱 QR Code generated. Please scan with WhatsApp:");
       qrcode.generate(qr, { small: true });
-      logger.info("Go to WhatsApp → Settings → Linked Devices → Link a Device");
-    }
-
-    // Connection closed
-    if (connection === "close") {
-      const shouldReconnect =
-        lastDisconnect?.error instanceof Boom
-          ? lastDisconnect.error.output.statusCode !==
-            DisconnectReason.loggedOut
-          : true;
-
-      if (shouldReconnect) {
-        logger.error("Connection closed. Attempting to reconnect...");
-        this.start();
-      } else {
-        logger.error("Session logged out. Please restart to reconnect.");
-      }
-      return;
-    }
-
-    // Connection opened
-    if (connection === "open") {
-      this.botJid = this.webSocket?.user?.id;
-      logger.info("Connected to WhatsApp successfully 🚀");
       logger.info(
-        `Bot LID: ${this.botLid}, JID: ${this.botJid}, Name: ${this.botName}`
+        "💡 Go to: WhatsApp → Settings → Linked Devices → Link a Device"
       );
-      logger.info("Bot is ready! Waiting for mentions...");
+    }
+
+    // Handle connection close
+    if (connection === "close") {
+      this.isConnected = false;
+      this.handleDisconnect(lastDisconnect);
       return;
+    }
+
+    // Handle successful connection
+    if (connection === "open") {
+      this.isConnected = true;
+      this.reconnectAttempts = 0;
+
+      // Update bot identity from user info
+      if (this.socket?.user?.id) {
+        this.botIdentity.jid = this.socket.user.id;
+      }
+
+      logger.info("✅ Connected to WhatsApp successfully!");
+      logger.info("🤖 Bot Identity:", this.botIdentity);
+      logger.info("👂 Bot is ready and listening for mentions...");
     }
   }
 
-  async handleMessages({ messages }: any) {
-    const msg = messages[0];
-    if (!msg.message) {
-      logger.info("Received message has no content, skipping.");
+  /**
+   * Handle disconnection and implement reconnect logic
+   */
+  private handleDisconnect(lastDisconnect: any): void {
+    const shouldReconnect =
+      lastDisconnect?.error instanceof Boom
+        ? lastDisconnect.error.output.statusCode !== DisconnectReason.loggedOut
+        : true;
+
+    if (!shouldReconnect) {
+      logger.error(
+        "❌ Session logged out. Please restart and re-authenticate."
+      );
       return;
     }
 
+    if (this.reconnectAttempts >= this.MAX_RECONNECT_ATTEMPTS) {
+      logger.error(
+        `❌ Max reconnection attempts (${this.MAX_RECONNECT_ATTEMPTS}) reached. Giving up.`
+      );
+      return;
+    }
+
+    this.reconnectAttempts++;
+    const delay = this.RECONNECT_DELAY_MS * this.reconnectAttempts;
+
+    logger.warn(
+      `⚠️ Connection closed. Reconnecting in ${delay / 1000}s... (Attempt ${
+        this.reconnectAttempts
+      }/${this.MAX_RECONNECT_ATTEMPTS})`
+    );
+
+    setTimeout(() => {
+      this.start().catch((err) => {
+        logger.error("Failed to reconnect:", err);
+      });
+    }, delay);
+  }
+
+  /**
+   * Handle incoming messages
+   */
+  private async handleMessagesUpsert({
+    messages,
+    type,
+  }: {
+    messages: WAMessage[];
+    type: string;
+  }): Promise<void> {
+    for (const msg of messages) {
+      try {
+        await this.processMessage(msg);
+      } catch (error) {
+        logger.error("Error processing message:", error);
+        // Continue processing other messages even if one fails
+      }
+    }
+  }
+
+  /**
+   * Process a single message
+   */
+  private async processMessage(msg: WAMessage): Promise<void> {
+    // Ignore messages without content
+    if (!msg.message) {
+      logger.debug("Received message without content, skipping.");
+      return;
+    }
+
+    // Extract message context
+    const context = this.extractMessageContext(msg);
+
+    logger.info(
+      `📨 Message from ${context.senderId} in ${context.chatId}${
+        context.isGroup ? " (group)" : ""
+      }`
+    );
+    logger.debug(`Message text: "${context.text}"`);
+
+    // Check if this is a reply to bot's message
+    const isReplyToBot = this.isBotRepliedTo(msg);
+    if (isReplyToBot) {
+      logger.info("💬 User replied to bot's message");
+    }
+
+    // Handle ping command
+    if (context.text.includes("/ping")) {
+      await this.sendMessage(context.chatId, { text: "🏓 Pong!" });
+      return;
+    }
+
+    // Check if bot is mentioned or replied to
+    const isMentioned = this.isBotMentioned(msg);
+
+    if (!isMentioned && !isReplyToBot) {
+      logger.debug("Bot not mentioned or replied to, skipping message.");
+      return;
+    }
+
+    // Rate limiting check
+    if (!this.rateLimiter.tryConsume(context.senderId)) {
+      logger.warn(`⚠️ Rate limit exceeded for user ${context.senderId}`);
+      await this.sendMessage(context.chatId, {
+        text: "⏳ Please slow down! You're sending too many messages.",
+      });
+      return;
+    }
+
+    // Send typing indicator
+    await this.sendTypingIndicator(context.chatId, true);
+
+    try {
+      // Generate AI response with conversation context
+      const reply = await this.aiService.generateReply(
+        context.text,
+        context.chatId
+      );
+
+      // Send reply
+      await this.sendMessage(context.chatId, { text: reply });
+
+      logger.info(`✅ Sent AI reply to ${context.chatId}`);
+    } catch (error) {
+      logger.error("Error generating AI reply:", error);
+
+      // Send error message to user
+      await this.sendMessage(context.chatId, {
+        text: "❌ Sorry, I encountered an error processing your request. Please try again.",
+      });
+    } finally {
+      // Stop typing indicator
+      await this.sendTypingIndicator(context.chatId, false);
+    }
+  }
+
+  /**
+   * Extract message context and metadata
+   */
+  private extractMessageContext(msg: WAMessage): MessageContext {
     const chatId = msg.key.remoteJid!;
     const senderId = msg.key.participant || chatId;
     const isGroup = chatId.endsWith("@g.us");
 
-    const text = this.extractText(msg.message);
-    logger.info(
-      `Incoming message from: ${senderId}, chat: ${chatId}, Extracted message text:'${text}'`
-    );
+    // Extract text from various message types
+    const rawText = this.extractText(msg.message!);
+    const text = rawText.toLowerCase().trim();
 
-    if (msg.message?.extendedTextMessage?.contextInfo?.quotedMessage) {
-      logger.info("Message reply detected.");
-    }
+    // Extract quoted message if exists
+    const quotedMessage =
+      msg.message?.extendedTextMessage?.contextInfo?.quotedMessage || undefined;
 
-    const userMessage = (
-      msg.message?.conversation?.trim() ||
-      msg.message?.extendedTextMessage?.text?.trim() ||
-      msg.message?.imageMessage?.caption?.trim() ||
-      msg.message?.videoMessage?.caption?.trim() ||
-      msg.message?.buttonsResponseMessage?.selectedButtonId?.trim() ||
+    // Extract mentioned JIDs
+    const mentionedJids =
+      msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+
+    return {
+      chatId,
+      senderId,
+      isGroup,
+      text,
+      rawText,
+      quotedMessage,
+      mentionedJids,
+    };
+  }
+
+  /**
+   * Extract text content from various message types
+   */
+  private extractText(message: proto.IMessage): string {
+    // Try different message types in order of priority
+    return (
+      message.conversation ||
+      message.extendedTextMessage?.text ||
+      message.imageMessage?.caption ||
+      message.videoMessage?.caption ||
+      message.documentMessage?.caption ||
+      message.buttonsResponseMessage?.selectedButtonId ||
+      message.listResponseMessage?.singleSelectReply?.selectedRowId ||
       ""
-    )
-      .toLowerCase()
-      .replace(/\.\s+/g, ".")
-      .trim();
+    );
+  }
 
-    // Preserve raw message for commands like .tag that need original casing
-    const rawText =
-      msg.message?.conversation?.trim() ||
-      msg.message?.extendedTextMessage?.text?.trim() ||
-      msg.message?.imageMessage?.caption?.trim() ||
-      msg.message?.videoMessage?.caption?.trim() ||
-      "";
+  /**
+   * Check if bot is mentioned in the message
+   */
+  private isBotMentioned(msg: WAMessage): boolean {
+    const mentionedJids =
+      msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
 
-    // Only log command usage
-    if (userMessage.startsWith(".")) {
-      console.log(
-        `📝 Command used in ${isGroup ? "group" : "private"}: ${userMessage}`
+    if (mentionedJids.length === 0) {
+      return false;
+    }
+
+    const isMentioned =
+      mentionedJids.includes(this.botIdentity.jid!) ||
+      mentionedJids.includes(this.botIdentity.lid!);
+
+    if (isMentioned) {
+      logger.debug(`Bot mentioned via JID: ${mentionedJids.join(", ")}`);
+    }
+
+    return isMentioned;
+  }
+
+  /**
+   * Check if the message is a reply to bot's message
+   */
+  private isBotRepliedTo(msg: WAMessage): boolean {
+    const quotedMsg =
+      msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+
+    if (!quotedMsg) {
+      return false;
+    }
+
+    const quotedParticipant =
+      msg.message?.extendedTextMessage?.contextInfo?.participant;
+
+    // Check if quoted message is from bot
+    const isFromBot =
+      quotedParticipant === this.botIdentity.jid ||
+      quotedParticipant === this.botIdentity.lid;
+
+    if (isFromBot) {
+      logger.debug("Message is a reply to bot's previous message");
+    }
+
+    return isFromBot;
+  }
+
+  /**
+   * Send a message to a chat
+   */
+  async sendMessage(
+    chatId: string,
+    content: any
+  ): Promise<WAMessage | undefined> {
+    if (!this.socket) {
+      throw new Error("WhatsApp socket not initialized");
+    }
+
+    if (!this.isConnected) {
+      throw new Error("WhatsApp not connected");
+    }
+
+    try {
+      return await this.socket.sendMessage(chatId, content);
+    } catch (error) {
+      logger.error(`Failed to send message to ${chatId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Send typing indicator
+   */
+  async sendTypingIndicator(chatId: string, isTyping: boolean): Promise<void> {
+    if (!this.socket || !this.isConnected) return;
+
+    try {
+      await this.socket.sendPresenceUpdate(
+        isTyping ? "composing" : "paused",
+        chatId
       );
+    } catch (error) {
+      logger.debug("Failed to send typing indicator:", error);
+      // Non-critical error, don't throw
     }
-
-    if (text.includes("/ping")) {
-      await this.sendMessage(chatId, { text: "pong 🏓" });
-      logger.info(`Replied with pong 🏓 to chat ${chatId}`);
-      return;
-    }
-
-    const mentioned = this.isBotMentioned(msg);
-    if (!mentioned) {
-      logger.info(`Bot wasn't mentioned skipping message.`);
-      return;
-    }
-
-    const mentionedJids =
-      msg.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
-    if (mentionedJids.length > 0) {
-      logger.info(`Mentioned JIDs in this message: ${mentionedJids}`);
-    }
-
-    // Use chatId as the unique identifier for conversation history
-    const reply = await this.aiService.generateReply(text, chatId);
-    await this.sendMessage(chatId, { text: reply });
-    logger.info(`Sent AI-generated reply to chat ${chatId}`);
   }
 
-  extractText(message: any) {
-    if (message.conversation) return message.conversation;
-    if (message.extendedTextMessage) return message.extendedTextMessage.text;
-    return "";
+  /**
+   * Send read receipt
+   */
+  async markAsRead(chatId: string, messageKeys: any[]): Promise<void> {
+    if (!this.socket || !this.isConnected) return;
+
+    try {
+      await this.socket.readMessages(messageKeys);
+    } catch (error) {
+      logger.debug("Failed to mark messages as read:", error);
+    }
   }
 
-  isBotMentioned(message: any) {
-    const mentionedJids =
-      message.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
-    logger.info(`Mentioned JIDs in this message: ${mentionedJids}`);
-    const mentioned =
-      mentionedJids.includes(this.botJid) ||
-      mentionedJids.includes(this.botLid);
-    return mentioned;
+  /**
+   * Get bot identity information
+   */
+  getBotIdentity(): BotIdentity {
+    return { ...this.botIdentity };
   }
 
-  sendMessage(chatId: string, content: any) {
-    if (!this.webSocket) throw new Error("WebSocket not initialized");
-    return this.webSocket.sendMessage(chatId, content);
+  /**
+   * Check if the service is connected
+   */
+  isServiceConnected(): boolean {
+    return this.isConnected;
+  }
+
+  /**
+   * Disconnect and cleanup
+   */
+  async disconnect(): Promise<void> {
+    if (this.socket) {
+      logger.info("Disconnecting WhatsApp service...");
+      await this.socket.logout();
+      this.socket = null;
+      this.isConnected = false;
+      logger.info("WhatsApp service disconnected");
+    }
+  }
+
+  /**
+   * Get socket instance (for advanced operations)
+   */
+  getSocket(): WASocket | null {
+    return this.socket;
   }
 }
 
-export const whatsappService = new WhatsappService();
+// Export as class (not singleton) for better testability
+export default WhatsappService;
