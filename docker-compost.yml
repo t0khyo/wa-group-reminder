@@ -1,0 +1,39 @@
+services:
+  app:
+    build: .
+    container_name: gigi-wa-bot
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      # use the DATABASE_URL env var if provided; otherwise fallback to the default that points to the db service
+      DATABASE_URL: ${DATABASE_URL:postgresql://postgres:postgres@db:5432/gigi_db?schema=public}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      NODE_ENV: production
+    volumes:
+      - .:/app
+    command: ["npm", "run", "start"]
+    ports:
+      - "3000:3000"
+
+  db:
+    image: postgres:16
+    container_name: gigi-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: gigi_db
+    ports:
+      - "5437:5432" # host:container -> externally reachable on localhost:5437
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d gigi_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+volumes:
+  db-data:
