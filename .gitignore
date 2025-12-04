@@ -25,3 +25,6 @@ Thumbs.db
 *.swp
 *.swo
 /src/generated/prisma
+
+# Build output
+/dist

@@ -48,7 +48,7 @@ export class WhatsappService {
   private rateLimiter: RateLimiter;
   private isConnected: boolean = false;
   private reconnectAttempts: number = 0;
-  private readonly MAX_RECONNECT_ATTEMPTS = 5;
+  private readonly MAX_RECONNECT_ATTEMPTS = 10;
   private readonly RECONNECT_DELAY_MS = 5000;
 
   constructor(aiService?: AiService, authPath: string = "./auth_info") {
@@ -188,15 +188,13 @@ export class WhatsappService {
         : true;
 
     if (!shouldReconnect) {
-      logger.error(
-        "❌ Session logged out. Please restart and re-authenticate."
-      );
-      return;
+      logger.error("Session logged out. Please restart and re-authenticate.");
+      // return;
     }
 
     if (this.reconnectAttempts >= this.MAX_RECONNECT_ATTEMPTS) {
       logger.error(
-        `❌ Max reconnection attempts (${this.MAX_RECONNECT_ATTEMPTS}) reached. Giving up.`
+        `Max reconnection attempts (${this.MAX_RECONNECT_ATTEMPTS}) reached. Giving up.`
       );
       return;
     }
@@ -205,7 +203,7 @@ export class WhatsappService {
     const delay = this.RECONNECT_DELAY_MS * this.reconnectAttempts;
 
     logger.warn(
-      `⚠️ Connection closed. Reconnecting in ${delay / 1000}s... (Attempt ${
+      `Connection closed. Reconnecting in ${delay / 1000}s... (Attempt ${
         this.reconnectAttempts
       }/${this.MAX_RECONNECT_ATTEMPTS})`
     );
@@ -241,9 +239,16 @@ export class WhatsappService {
    * Process a single message
    */
   private async processMessage(msg: WAMessage): Promise<void> {
+    logger.info("Received message:", msg);
+
     // Ignore messages without content
     if (!msg.message) {
       logger.debug("Received message without content, skipping.");
+      return;
+    }
+
+    if (msg.key.fromMe) {
+      logger.debug("Received own message, skipping.");
       return;
     }
 
@@ -260,7 +265,7 @@ export class WhatsappService {
     // Check if this is a reply to bot's message
     const isReplyToBot = this.isBotRepliedTo(msg);
     if (isReplyToBot) {
-      logger.info("User replied to bot's message");
+      logger.info(`User ${msg.key.remoteJid} replied to bot's message`);
     }
 
     // Handle ping command

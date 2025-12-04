@@ -12,3 +12,22 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+model Reminder {
+  id               String    @id @default(uuid())
+  reminderId       String    @unique
+  chatId           String
+  senderId         String?               
+  title            String
+  mentions         String[]              
+  remindAtUtc      DateTime    
+  timezone         String    @default("Asia/Kuwait")
+  reminder24hSent  Boolean   @default(false)
+  reminder1hSent   Boolean   @default(false)
+  reminderSent     Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([remindAtUtc])
+  @@index([chatId, remindAtUtc])
+}
