@@ -3,6 +3,7 @@ import logger from "../utils/logger.js";
 import { reminderService } from "./ReminderService.js";
 import dotenv from "dotenv";
 import { parseDateTime } from "../utils/DateParser.js";
+import { DEFAULT_TIMEZONE } from "../config/TimeZone.js";
 dotenv.config();
 
 const prompt: string = `
@@ -187,34 +188,28 @@ export class AiService {
     try {
       logger.info(`Creating reminder in chat ${chatId}:`, args);
 
-      // Parse the datetime string
+      // Parse the datetime string (defaults to DEFAULT_TIMEZONE)
       const scheduledTime = parseDateTime(args.datetime);
 
-      // Create the reminder
+      // Create the reminder with timezone
       const reminder = await reminderService.createReminder(
         chatId,
         args.message,
         scheduledTime.utc,
-        args.mentions || []
+        args.mentions || [],
+        "system",
+        scheduledTime.timezone
       );
-
-      const reminderTimeStr = scheduledTime.utc.toLocaleString("en-US", {
-        weekday: "short",
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
 
       return JSON.stringify({
         success: true,
         reminder_id: reminder.id,
-        message: `Reminder created! I'll remind you on ${reminderTimeStr}`,
+        message: `Reminder created! I'll remind you on ${reminder.scheduledTimeLocal}`,
         details: {
           id: reminder.id,
           message: args.message,
-          scheduled_time: reminderTimeStr,
+          scheduled_time: reminder.scheduledTimeLocal,
+          timezone: reminder.timezone,
           mentions: args.mentions || [],
         },
       });
@@ -254,9 +249,9 @@ export class AiService {
       const formattedReminders = reminders.map((r) => ({
         id: r.id,
         message: r.message,
-        scheduled_time: r.scheduledTime.toLocaleString(),
+        scheduled_time: r.scheduledTimeLocal,
         status: r.status,
-        mentions: r.mentions,
+        // mentions: r.mentions,
       }));
 
       return JSON.stringify({

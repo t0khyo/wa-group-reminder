@@ -20,7 +20,8 @@ model Reminder {
   senderId         String?               
   title            String
   mentions         String[]              
-  remindAtUtc      DateTime    
+  remindAtUtc      DateTime
+  timezone         String    @default("Asia/Kuwait")
   reminder24hSent  Boolean   @default(false)
   reminder1hSent   Boolean   @default(false)
   reminderSent     Boolean   @default(false)

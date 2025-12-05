@@ -1,191 +1,174 @@
-import { prisma } from "@/lib/prisma.js";
+import { prisma } from "../lib/prisma.js";
 import logger from "../utils/logger.js";
 import * as chrono from "chrono-node";
-import { Reminder } from "@/generated/prisma/client.js";
+import { Reminder } from "../generated/prisma/client.js";
 import { DateTime } from "luxon";
+import { DEFAULT_TIMEZONE } from "../config/TimeZone.js";
 
 /**
- * ReminderService - Handles reminder creation, listing, and cancellation
- * TODO: Integrate with Prisma database and scheduling system
+ * ReminderService - Handles reminder creation, listing, and cancellation using Prisma
  */
-
 export interface ReminderDto {
   id: string;
   chatId: string;
   message: string;
   scheduledTime: Date;
+  scheduledTimeLocal: string; // Local time in the reminder's timezone
+  timezone: string;
   mentions: string[];
   status: "pending" | "active" | "completed" | "cancelled";
   createdAt: Date;
   createdBy: string;
 }
 
-// model Reminder {
-//   id               String    @id @default(uuid())
-//   reminderId       Int       @default(autoincrement())
-//   chatId           String
-//   senderId         String?
-//   title            String
-//   mentions         String[]
-//   remindAtUtc      DateTime
-//   timezone         String    @default("Asia/Kuwait")
-//   reminder24hSent  Boolean   @default(false)
-//   reminder1hSent   Boolean   @default(false)
-//   reminderSent     Boolean   @default(false)
-//   createdAt        DateTime  @default(now())
-//   updatedAt        DateTime  @updatedAt
-
-//   @@index([remindAtUtc])
-//   @@index([chatId, remindAtUtc])
-// }
-
-export interface ReminderRequest {
-  chatId: string;
-  senderId?: string;
-  title: string;
-  mentions?: string[];
-  remindAtUtc: Date;
-  timezone: string;
-}
-
-export interface ReminderResponse {
-  reminderId: string;
-  chatId: string;
-  senderId?: string;
-  title: string;
-  mentions?: string[];
-  remindAtUtc: Date;
-  timezone: string;
-  remindAtLocal: string;
-  reminder24hSent: boolean;
-  reminder1hSent: boolean;
-  reminderSent: boolean;
-}
-
 export class ReminderService {
-  // In-memory storage for now - replace with database later
-  private reminders: Map<string, ReminderDto> = new Map();
+  /**
+   * Convert Prisma Reminder model to ReminderDto
+   */
+  private toReminderDto(reminder: Reminder): ReminderDto {
+    const timezone = reminder.timezone || DEFAULT_TIMEZONE;
+    const scheduledTimeLocal = DateTime.fromJSDate(reminder.remindAtUtc, {
+      zone: "utc",
+    })
+      .setZone(timezone)
+      .toLocaleString(DateTime.DATETIME_FULL);
+
+    return {
+      id: reminder.id,
+      chatId: reminder.chatId,
+      message: reminder.title,
+      scheduledTime: reminder.remindAtUtc,
+      scheduledTimeLocal,
+      timezone,
+      mentions: reminder.mentions,
+      status: reminder.reminderSent ? "completed" : "active",
+      createdAt: reminder.createdAt,
+      createdBy: reminder.senderId || "system",
+    };
+  }
 
   /**
-   * Create a new reminder
+   * Create a new reminder using Prisma
    */
   async createReminder(
     chatId: string,
     message: string,
     scheduledTime: Date,
     mentions: string[] = [],
-    createdBy: string = "system"
+    createdBy: string = "system",
+    timezone: string = DEFAULT_TIMEZONE
   ): Promise<ReminderDto> {
-    const reminderId = `REM-${Date.now()}-${Math.random()
-      .toString(36)
-      .substr(2, 9)}`;
+    const reminder = await prisma.reminder.create({
+      data: {
+        chatId,
+        senderId: createdBy,
+        title: message,
+        mentions,
+        remindAtUtc: scheduledTime,
+        timezone,
+      },
+    });
 
-    const reminder: ReminderDto = {
-      id: reminderId,
-      chatId,
-      message,
-      scheduledTime,
-      mentions,
-      status: "active",
-      createdAt: new Date(),
-      createdBy,
-    };
+    logger.info(`Created reminder ${reminder.id} for chat ${chatId}`);
 
-    this.reminders.set(reminderId, reminder);
+    // Schedule the actual reminder job
+    this.scheduleReminderJob(this.toReminderDto(reminder));
 
-    logger.info(`Created reminder ${reminderId} for chat ${chatId}`);
-
-    // TODO: Schedule the actual reminder job here
-    // Example: Use node-schedule, bull queue, or similar
-    this.scheduleReminderJob(reminder);
-
-    return reminder;
+    return this.toReminderDto(reminder);
   }
 
-  // Create a new Reminder with prisma
-  // async createReminderV2(reminder: ReminderRequest): Promise<ReminderResponse> {
-  //   const createdReminder = await prisma.reminder.create({
-  //     data: {
-  //       chatId: reminder.chatId,
-  //       senderId: reminder.senderId,
-  //       title: reminder.title,
-  //       mentions: reminder.mentions ?? [],
-  //       remindAtUtc: reminder.remindAtUtc,
-  //       timezone: reminder.timezone ?? "Asia/Kuwait",
-  //     },
-  //   });
-
-  //   return this.toReminderResponse(createdReminder);
-  // }
-
   /**
-   * List reminders for a specific chat
+   * List reminders for a specific chat using Prisma
    */
   async listReminders(
     chatId: string,
     status?: "active" | "completed" | "cancelled" | "all"
   ): Promise<ReminderDto[]> {
-    const allReminders = Array.from(this.reminders.values()).filter(
-      (r) => r.chatId === chatId
-    );
+    let whereClause: any = { chatId };
 
-    if (!status || status === "all") {
-      return allReminders;
+    if (status && status !== "all") {
+      if (status === "active") {
+        whereClause.reminderSent = false;
+      } else if (status === "completed") {
+        whereClause.reminderSent = true;
+      }
+      // Note: We don't have a cancelled status in the DB schema yet
+      // You may want to add a status field to track cancelled reminders
     }
 
-    return allReminders.filter((r) => r.status === status);
+    const reminders = await prisma.reminder.findMany({
+      where: whereClause,
+      orderBy: { remindAtUtc: "asc" },
+    });
+
+    return reminders.map(this.toReminderDto);
   }
 
   /**
-   * Get a specific reminder by ID
+   * Get a specific reminder by ID using Prisma
    */
   async getReminder(reminderId: string): Promise<ReminderDto | null> {
-    return this.reminders.get(reminderId) || null;
+    const reminder = await prisma.reminder.findUnique({
+      where: { id: reminderId },
+    });
+
+    return reminder ? this.toReminderDto(reminder) : null;
   }
 
   /**
-   * Cancel a reminder
+   * Cancel a reminder using Prisma
+   * Note: Since we don't have a status field in the schema, we'll delete the reminder
+   * or you can add a 'cancelled' boolean field to the schema
    */
   async cancelReminder(reminderId: string): Promise<boolean> {
-    const reminder = this.reminders.get(reminderId);
+    try {
+      const reminder = await prisma.reminder.findUnique({
+        where: { id: reminderId },
+      });
 
-    if (!reminder) {
-      logger.warn(`Reminder ${reminderId} not found`);
+      if (!reminder) {
+        logger.warn(`Reminder ${reminderId} not found`);
+        return false;
+      }
+
+      if (reminder.reminderSent) {
+        logger.warn(`Reminder ${reminderId} is already completed`);
+        return false;
+      }
+
+      // Delete the reminder (or you could add a 'cancelled' field)
+      await prisma.reminder.delete({
+        where: { id: reminderId },
+      });
+
+      logger.info(`Cancelled reminder ${reminderId}`);
+
+      // Cancel the scheduled job
+      this.cancelReminderJob(reminderId);
+
+      return true;
+    } catch (error) {
+      logger.error(`Error cancelling reminder ${reminderId}:`, error);
       return false;
     }
-
-    if (reminder.status === "completed" || reminder.status === "cancelled") {
-      logger.warn(`Reminder ${reminderId} is already ${reminder.status}`);
-      return false;
-    }
-
-    reminder.status = "cancelled";
-    this.reminders.set(reminderId, reminder);
-
-    logger.info(`Cancelled reminder ${reminderId}`);
-
-    // TODO: Cancel the scheduled job
-    this.cancelReminderJob(reminderId);
-
-    return true;
   }
 
   /**
-   * Mark reminder as completed (called when the reminder is sent)
+   * Mark reminder as completed (called when the reminder is sent) using Prisma
    */
   async completeReminder(reminderId: string): Promise<boolean> {
-    const reminder = this.reminders.get(reminderId);
+    try {
+      await prisma.reminder.update({
+        where: { id: reminderId },
+        data: { reminderSent: true },
+      });
 
-    if (!reminder) {
+      logger.info(`Completed reminder ${reminderId}`);
+      return true;
+    } catch (error) {
+      logger.error(`Error completing reminder ${reminderId}:`, error);
       return false;
     }
-
-    reminder.status = "completed";
-    this.reminders.set(reminderId, reminder);
-
-    logger.info(`Completed reminder ${reminderId}`);
-
-    return true;
   }
 
   /**
@@ -280,23 +263,25 @@ export class ReminderService {
   }
 
   /**
-   * Execute the reminder (send the message)
+   * Execute the reminder (send the message) using Prisma
    * TODO: Integrate with WhatsappService to actually send the message
    */
   private async executeReminder(reminderId: string): Promise<void> {
-    const reminder = this.reminders.get(reminderId);
+    const reminder = await prisma.reminder.findUnique({
+      where: { id: reminderId },
+    });
 
-    if (!reminder || reminder.status !== "active") {
+    if (!reminder || reminder.reminderSent) {
       return;
     }
 
-    logger.info(`Executing reminder ${reminderId}: ${reminder.message}`);
+    logger.info(`Executing reminder ${reminderId}: ${reminder.title}`);
 
     // TODO: Send the actual WhatsApp message here
     // Example:
     // const whatsappService = new WhatsappService();
     // await whatsappService.sendMessage(reminder.chatId, {
-    //   text: `⏰ Reminder: ${reminder.message}`,
+    //   text: `⏰ Reminder: ${reminder.title}`,
     //   mentions: reminder.mentions
     // });
 
@@ -304,25 +289,23 @@ export class ReminderService {
   }
 
   /**
-   * Clean up old completed/cancelled reminders
+   * Clean up old completed reminders using Prisma
    */
   async cleanupOldReminders(olderThanDays: number = 30): Promise<number> {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
 
-    let cleaned = 0;
-    for (const [id, reminder] of this.reminders.entries()) {
-      if (
-        (reminder.status === "completed" || reminder.status === "cancelled") &&
-        reminder.createdAt < cutoffDate
-      ) {
-        this.reminders.delete(id);
-        cleaned++;
-      }
-    }
+    const result = await prisma.reminder.deleteMany({
+      where: {
+        reminderSent: true,
+        createdAt: {
+          lt: cutoffDate,
+        },
+      },
+    });
 
-    logger.info(`Cleaned up ${cleaned} old reminders`);
-    return cleaned;
+    logger.info(`Cleaned up ${result.count} old reminders`);
+    return result.count;
   }
 
   // formatReminderId(id: number): string {
@@ -350,7 +333,7 @@ export class ReminderService {
   // reminderLocalTime(remindAtUtc: Date, timezone: string): string {
   //   return DateTime.fromJSDate(remindAtUtc, { zone: "utc" })
   //     .setZone(timezone)
-  //     .toISO(); 
+  //     .toISO();
   // }
 }
 
