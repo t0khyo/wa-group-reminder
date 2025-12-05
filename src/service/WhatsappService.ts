@@ -5,6 +5,7 @@ import makeWASocket, {
   WAMessage,
   proto,
   ConnectionState,
+  Browsers,
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import qrcode from "qrcode-terminal";
@@ -71,6 +72,9 @@ export class WhatsappService {
         auth: state,
         printQRInTerminal: false, // We handle QR display manually
         defaultQueryTimeoutMs: 60000,
+        browser: Browsers.macOS("Safari"),
+        connectTimeoutMs: 60000,
+        syncFullHistory: false,
       });
 
       this.setupEventHandlers(saveCreds);
