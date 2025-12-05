@@ -284,7 +284,7 @@ export class WhatsappService {
 
     // Rate limiting check
     if (!this.rateLimiter.tryConsume(context.senderId)) {
-      logger.warn(`⚠️ Rate limit exceeded for user ${context.senderId}`);
+      logger.warn(`Rate limit exceeded for user ${context.senderId}`);
       await this.sendMessage(context.chatId, {
         text: "⏳ Please slow down! You're sending too many messages.",
       });
@@ -337,6 +337,12 @@ export class WhatsappService {
     // Extract mentioned JIDs
     const mentionedJids =
       msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+
+    logger.info(
+      `Extracted message context: chatId=${chatId}, senderId=${senderId}, isGroup=${isGroup}, quotedMessage=${quotedMessage ? JSON.stringify(quotedMessage) : "undefined"} text="${text}", mentionedJids=[${mentionedJids.join(
+        ", "
+      )}]`
+    );
 
     return {
       chatId,

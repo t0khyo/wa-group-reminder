@@ -1,12 +1,15 @@
+import { prisma } from "@/lib/prisma.js";
 import logger from "../utils/logger.js";
 import * as chrono from "chrono-node";
+import { Reminder } from "@/generated/prisma/client.js";
+import { DateTime } from "luxon";
 
 /**
  * ReminderService - Handles reminder creation, listing, and cancellation
  * TODO: Integrate with Prisma database and scheduling system
  */
 
-export interface Reminder {
+export interface ReminderDto {
   id: string;
   chatId: string;
   message: string;
@@ -17,9 +20,51 @@ export interface Reminder {
   createdBy: string;
 }
 
+// model Reminder {
+//   id               String    @id @default(uuid())
+//   reminderId       Int       @default(autoincrement())
+//   chatId           String
+//   senderId         String?
+//   title            String
+//   mentions         String[]
+//   remindAtUtc      DateTime
+//   timezone         String    @default("Asia/Kuwait")
+//   reminder24hSent  Boolean   @default(false)
+//   reminder1hSent   Boolean   @default(false)
+//   reminderSent     Boolean   @default(false)
+//   createdAt        DateTime  @default(now())
+//   updatedAt        DateTime  @updatedAt
+
+//   @@index([remindAtUtc])
+//   @@index([chatId, remindAtUtc])
+// }
+
+export interface ReminderRequest {
+  chatId: string;
+  senderId?: string;
+  title: string;
+  mentions?: string[];
+  remindAtUtc: Date;
+  timezone: string;
+}
+
+export interface ReminderResponse {
+  reminderId: string;
+  chatId: string;
+  senderId?: string;
+  title: string;
+  mentions?: string[];
+  remindAtUtc: Date;
+  timezone: string;
+  remindAtLocal: string;
+  reminder24hSent: boolean;
+  reminder1hSent: boolean;
+  reminderSent: boolean;
+}
+
 export class ReminderService {
   // In-memory storage for now - replace with database later
-  private reminders: Map<string, Reminder> = new Map();
+  private reminders: Map<string, ReminderDto> = new Map();
 
   /**
    * Create a new reminder
@@ -30,12 +75,12 @@ export class ReminderService {
     scheduledTime: Date,
     mentions: string[] = [],
     createdBy: string = "system"
-  ): Promise<Reminder> {
+  ): Promise<ReminderDto> {
     const reminderId = `REM-${Date.now()}-${Math.random()
       .toString(36)
       .substr(2, 9)}`;
 
-    const reminder: Reminder = {
+    const reminder: ReminderDto = {
       id: reminderId,
       chatId,
       message,
@@ -57,13 +102,29 @@ export class ReminderService {
     return reminder;
   }
 
+  // Create a new Reminder with prisma
+  // async createReminderV2(reminder: ReminderRequest): Promise<ReminderResponse> {
+  //   const createdReminder = await prisma.reminder.create({
+  //     data: {
+  //       chatId: reminder.chatId,
+  //       senderId: reminder.senderId,
+  //       title: reminder.title,
+  //       mentions: reminder.mentions ?? [],
+  //       remindAtUtc: reminder.remindAtUtc,
+  //       timezone: reminder.timezone ?? "Asia/Kuwait",
+  //     },
+  //   });
+
+  //   return this.toReminderResponse(createdReminder);
+  // }
+
   /**
    * List reminders for a specific chat
    */
   async listReminders(
     chatId: string,
     status?: "active" | "completed" | "cancelled" | "all"
-  ): Promise<Reminder[]> {
+  ): Promise<ReminderDto[]> {
     const allReminders = Array.from(this.reminders.values()).filter(
       (r) => r.chatId === chatId
     );
@@ -78,7 +139,7 @@ export class ReminderService {
   /**
    * Get a specific reminder by ID
    */
-  async getReminder(reminderId: string): Promise<Reminder | null> {
+  async getReminder(reminderId: string): Promise<ReminderDto | null> {
     return this.reminders.get(reminderId) || null;
   }
 
@@ -190,7 +251,7 @@ export class ReminderService {
    * Schedule the actual reminder job
    * TODO: Implement with a proper job scheduler (Bull, node-schedule, etc.)
    */
-  private scheduleReminderJob(reminder: Reminder): void {
+  private scheduleReminderJob(reminder: ReminderDto): void {
     const delay = reminder.scheduledTime.getTime() - Date.now();
 
     if (delay > 0) {
@@ -263,6 +324,34 @@ export class ReminderService {
     logger.info(`Cleaned up ${cleaned} old reminders`);
     return cleaned;
   }
+
+  // formatReminderId(id: number): string {
+  //   return `R-${id}`;
+  // }
+
+  // toReminderResponse(reminder: Reminder): ReminderResponse {
+  //   return {
+  //     reminderId: this.formatReminderId(reminder.reminderId),
+  //     chatId: reminder.chatId,
+  //     senderId: reminder.senderId || undefined,
+  //     title: reminder.title,
+  //     mentions: reminder.mentions,
+  //     remindAtUtc: reminder.remindAtUtc,
+  //     remindAtLocal: this.reminderLocalTime(
+  //       reminder.remindAtUtc,
+  //       reminder.timezone
+  //     ),
+  //     reminder1hSent: reminder.reminder1hSent,
+  //     reminder24hSent: reminder.reminder24hSent,
+  //     reminderSent: reminder.reminderSent,
+  //   };
+  // }
+
+  // reminderLocalTime(remindAtUtc: Date, timezone: string): string {
+  //   return DateTime.fromJSDate(remindAtUtc, { zone: "utc" })
+  //     .setZone(timezone)
+  //     .toISO(); 
+  // }
 }
 
 // Singleton instance

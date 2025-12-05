@@ -2,7 +2,46 @@ import OpenAI from "openai";
 import logger from "../utils/logger.js";
 import { reminderService } from "./ReminderService.js";
 import dotenv from "dotenv";
+import { parseDateTime } from "../utils/DateParser.js";
 dotenv.config();
+
+const prompt: string = `
+You're Gigi, a WhatsApp assistant who chats naturally like a friend.
+
+CORE BEHAVIOR:
+- Keep it short (1-3 lines), casual, and friendly
+- Never reveal you're AI—chat like a human would
+- Never use your 
+- Reference previous messages naturally
+- Ask for missing info when needed
+- Confirm actions clearly
+
+WHATSAPP FORMATTING:
+*bold* _italic_ ~strikethrough~ \`code\`
+- No indentation or extra spacing
+- Use line breaks to separate sections
+- Keep it compact and scannable
+
+EMOJI USAGE:
+Use 1-2 emojis per message to enhance tone:
+- Positive: 😊 😎 😉
+- Funny: 😂 😅
+- Frustrated: 🙄 😤
+- Sad: 😔
+
+TASKS & REMINDERS:
+- Create, list, update, cancel reminders/tasks
+- Extract dates/times from messages
+- Never assume time always use what the user explicitly states
+- Status indicators:
+  🟩 Done
+  🟨 Pending
+  🟥 Cancelled
+- One task per line
+
+TONE:
+Mirror the user's vibe—joke with jokers, empathize with the sad. Be warm, slightly witty, totally human.
+`.trim();
 
 interface Message {
   role: "system" | "user" | "assistant" | "tool";
@@ -149,17 +188,17 @@ export class AiService {
       logger.info(`Creating reminder in chat ${chatId}:`, args);
 
       // Parse the datetime string
-      const scheduledTime = reminderService.parseDateTime(args.datetime);
+      const scheduledTime = parseDateTime(args.datetime);
 
       // Create the reminder
       const reminder = await reminderService.createReminder(
         chatId,
         args.message,
-        scheduledTime,
+        scheduledTime.utc,
         args.mentions || []
       );
 
-      const reminderTimeStr = scheduledTime.toLocaleString("en-US", {
+      const reminderTimeStr = scheduledTime.utc.toLocaleString("en-US", {
         weekday: "short",
         year: "numeric",
         month: "short",
@@ -171,7 +210,7 @@ export class AiService {
       return JSON.stringify({
         success: true,
         reminder_id: reminder.id,
-        message: `✅ Reminder created! I'll remind you on ${reminderTimeStr}`,
+        message: `Reminder created! I'll remind you on ${reminderTimeStr}`,
         details: {
           id: reminder.id,
           message: args.message,
@@ -285,13 +324,7 @@ export class AiService {
         this.conversationHistory.set(userId, [
           {
             role: "system",
-            content:
-              "Your name is Gigi. You are a helpful WhatsApp reminder bot assistant. " +
-              "You can help users create, list, and cancel reminders. " +
-              "When users want to set a reminder, extract the message and time, then use the create_reminder function. " +
-              "If you need more information to complete a task, ask the user for clarification. " +
-              "Keep responses concise and friendly. " +
-              "Remember the conversation context and refer back to previous messages when relevant.",
+            content: prompt,
           },
         ]);
       }
@@ -313,7 +346,7 @@ export class AiService {
 
       // Call OpenAI with function calling enabled
       let response = await this.client.chat.completions.create({
-        model: "gpt-4o-mini", // or gpt-4, gpt-3.5-turbo
+        model: "gpt-4o-mini",
         messages: this.conversationHistory.get(userId)!,
         tools: availableFunctions,
         tool_choice: "auto", // Let the model decide when to call functions
