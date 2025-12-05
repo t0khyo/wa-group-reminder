@@ -18,13 +18,13 @@ async function main() {
     // Graceful shutdown
     process.on("SIGINT", async () => {
       logger.info("Received SIGINT, shutting down gracefully...");
-      await whatsappService.disconnect();
+      // await whatsappService.disconnect();
       process.exit(0);
     });
 
     process.on("SIGTERM", async () => {
       logger.info("Received SIGTERM, shutting down gracefully...");
-      await whatsappService.disconnect();
+      // await whatsappService.disconnect();
       process.exit(0);
     });
   } catch (error) {
