@@ -4,7 +4,6 @@ import makeWASocket, {
   WASocket,
   WAMessage,
   proto,
-  AuthenticationState,
   ConnectionState,
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
@@ -270,7 +269,7 @@ export class WhatsappService {
 
     // Handle ping command
     if (context.text.includes("/ping")) {
-      await this.sendMessage(context.chatId, { text: "🏓 Pong!" });
+      await this.sendMessage(context.chatId, { text: "Pong 🏓" });
       return;
     }
 
@@ -286,7 +285,7 @@ export class WhatsappService {
     if (!this.rateLimiter.tryConsume(context.senderId)) {
       logger.warn(`Rate limit exceeded for user ${context.senderId}`);
       await this.sendMessage(context.chatId, {
-        text: "⏳ Please slow down! You're sending too many messages.",
+        text: "Please slow down! You're sending too many messages.",
       });
       return;
     }
@@ -310,7 +309,7 @@ export class WhatsappService {
 
       // Send error message to user
       await this.sendMessage(context.chatId, {
-        text: "❌ Sorry, I encountered an error processing your request. Please try again.",
+        text: "Sorry, I encountered an error processing your request. Please try again.",
       });
     } finally {
       // Stop typing indicator
@@ -339,9 +338,9 @@ export class WhatsappService {
       msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
 
     logger.info(
-      `Extracted message context: chatId=${chatId}, senderId=${senderId}, isGroup=${isGroup}, quotedMessage=${quotedMessage ? JSON.stringify(quotedMessage) : "undefined"} text="${text}", mentionedJids=[${mentionedJids.join(
-        ", "
-      )}]`
+      `Extracted message context: chatId=${chatId}, senderId=${senderId}, isGroup=${isGroup}, quotedMessage=${
+        quotedMessage ? JSON.stringify(quotedMessage) : "undefined"
+      } text="${text}", mentionedJids=[${mentionedJids.join(", ")}]`
     );
 
     return {
