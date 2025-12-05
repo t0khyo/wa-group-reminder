@@ -4,6 +4,7 @@ import * as chrono from "chrono-node";
 import { Reminder } from "../generated/prisma/client.js";
 import { DateTime } from "luxon";
 import { DEFAULT_TIMEZONE } from "../config/TimeZone.js";
+import { reminderScheduler } from "./ReminderScheduler.js";
 
 /**
  * ReminderService - Handles reminder creation, listing, and cancellation using Prisma
@@ -71,8 +72,13 @@ export class ReminderService {
 
     logger.info(`Created reminder ${reminder.id} for chat ${chatId}`);
 
-    // Schedule the actual reminder job
-    this.scheduleReminderJob(this.toReminderDto(reminder));
+    // Add to scheduler
+    await reminderScheduler.addReminder(
+      reminder.id,
+      reminder.remindAtUtc,
+      reminder.reminder24hSent,
+      reminder.reminder1hSent
+    );
 
     return this.toReminderDto(reminder);
   }
@@ -143,8 +149,8 @@ export class ReminderService {
 
       logger.info(`Cancelled reminder ${reminderId}`);
 
-      // Cancel the scheduled job
-      this.cancelReminderJob(reminderId);
+      // Cancel scheduled jobs
+      reminderScheduler.cancelReminder(reminderId);
 
       return true;
     } catch (error) {
@@ -228,64 +234,6 @@ export class ReminderService {
     const defaultDate = new Date(now);
     defaultDate.setHours(defaultDate.getHours() + 1);
     return defaultDate;
-  }
-
-  /**
-   * Schedule the actual reminder job
-   * TODO: Implement with a proper job scheduler (Bull, node-schedule, etc.)
-   */
-  private scheduleReminderJob(reminder: ReminderDto): void {
-    const delay = reminder.scheduledTime.getTime() - Date.now();
-
-    if (delay > 0) {
-      logger.info(
-        `Scheduling reminder ${reminder.id} to fire in ${Math.round(
-          delay / 1000
-        )} seconds`
-      );
-
-      // Simple setTimeout for demonstration - replace with proper job queue
-      setTimeout(() => {
-        this.executeReminder(reminder.id);
-      }, delay);
-    } else {
-      logger.warn(`Reminder ${reminder.id} scheduled time is in the past`);
-    }
-  }
-
-  /**
-   * Cancel a scheduled reminder job
-   * TODO: Implement with your job scheduler
-   */
-  private cancelReminderJob(reminderId: string): void {
-    logger.info(`Cancelling scheduled job for reminder ${reminderId}`);
-    // TODO: Cancel the scheduled job in your queue system
-  }
-
-  /**
-   * Execute the reminder (send the message) using Prisma
-   * TODO: Integrate with WhatsappService to actually send the message
-   */
-  private async executeReminder(reminderId: string): Promise<void> {
-    const reminder = await prisma.reminder.findUnique({
-      where: { id: reminderId },
-    });
-
-    if (!reminder || reminder.reminderSent) {
-      return;
-    }
-
-    logger.info(`Executing reminder ${reminderId}: ${reminder.title}`);
-
-    // TODO: Send the actual WhatsApp message here
-    // Example:
-    // const whatsappService = new WhatsappService();
-    // await whatsappService.sendMessage(reminder.chatId, {
-    //   text: `⏰ Reminder: ${reminder.title}`,
-    //   mentions: reminder.mentions
-    // });
-
-    await this.completeReminder(reminderId);
   }
 
   /**

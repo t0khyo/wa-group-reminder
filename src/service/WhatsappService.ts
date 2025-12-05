@@ -6,12 +6,14 @@ import makeWASocket, {
   proto,
   ConnectionState,
   Browsers,
+  cleanMessage,
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import qrcode from "qrcode-terminal";
 import logger from "../utils/logger.js";
 import { AiService } from "./AiService.js";
 import { RateLimiter } from "../utils/RateLimiter.js";
+import fs from "fs";
 
 // Type definitions
 interface MessageContent {
@@ -192,7 +194,8 @@ export class WhatsappService {
 
     if (!shouldReconnect) {
       logger.error("Session logged out. Please restart and re-authenticate.");
-      // return;
+      fs.rmSync(this.authPath, { recursive: true, force: true });
+      return;
     }
 
     if (this.reconnectAttempts >= this.MAX_RECONNECT_ATTEMPTS) {
@@ -438,12 +441,20 @@ export class WhatsappService {
       throw new Error("WhatsApp not connected");
     }
 
+    const message: string = this.cleanMessage(content.text);
+    content.text = message;
+
     try {
       return await this.socket.sendMessage(chatId, content);
     } catch (error) {
       logger.error(`Failed to send message to ${chatId}:`, error);
       throw error;
     }
+  }
+
+  private cleanMessage(message: string): string {
+    const cleanedMessage =  message.replace(/\*\*/g, '*').trim();
+    return cleanedMessage;
   }
 
   /**

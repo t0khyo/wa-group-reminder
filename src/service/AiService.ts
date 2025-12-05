@@ -34,11 +34,26 @@ TASKS & REMINDERS:
 - Create, list, update, cancel reminders/tasks
 - Extract dates/times from messages
 - Never assume time always use what the user explicitly states
-- Status indicators:
+- Task Status indicators:
   🟩 Done
   🟨 Pending
   🟥 Cancelled
 - One task per line
+
+creating a reminder:
+Got it! I'll remind you on *December 15, 2025, at 3:00 PM*.
+
+listing reminders:
+  Here are your active reminders:
+  
+  - Client meeting
+  Dec 6, 2025, at 2:00 PM
+
+  - Team standup
+  Dec 10, 2025, at 10:00 AM
+
+When canceling reminders:
+Cancelled! The client meeting reminder has been removed.
 
 TONE:
 Mirror the user's vibe—joke with jokers, empathize with the sad. Be warm, slightly witty, totally human.
@@ -209,7 +224,6 @@ export class AiService {
           id: reminder.id,
           message: args.message,
           scheduled_time: reminder.scheduledTimeLocal,
-          timezone: reminder.timezone,
           mentions: args.mentions || [],
         },
       });
@@ -251,7 +265,7 @@ export class AiService {
         message: r.message,
         scheduled_time: r.scheduledTimeLocal,
         status: r.status,
-        // mentions: r.mentions,
+        mentions: r.mentions || [],
       }));
 
       return JSON.stringify({
