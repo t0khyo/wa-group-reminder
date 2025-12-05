@@ -1,7 +1,7 @@
 import * as schedule from "node-schedule";
 import { prisma } from "../lib/prisma.js";
 import logger from "../utils/logger.js";
-import { DateTime } from "luxon";
+import { DateTime, Zone } from "luxon";
 
 // We'll set the WhatsApp service instance after initialization
 let whatsappService: any = null;
@@ -24,6 +24,7 @@ export function setWhatsappService(service: any): void {
 export class ReminderScheduler {
   private jobs: Map<string, schedule.Job[]> = new Map();
   private checkInterval: NodeJS.Timeout | null = null;
+  private dailyDigestJob: schedule.Job | null = null;
 
   constructor() {
     logger.info("ReminderScheduler initialized");
@@ -37,6 +38,9 @@ export class ReminderScheduler {
 
     // Load existing active reminders from database
     await this.loadActiveReminders();
+
+    // Schedule daily digest at 8 AM
+    this.scheduleDailyDigest();
 
     // Check every minute for reminders that need to be sent
     this.checkInterval = setInterval(async () => {
@@ -55,6 +59,12 @@ export class ReminderScheduler {
     if (this.checkInterval) {
       clearInterval(this.checkInterval);
       this.checkInterval = null;
+    }
+
+    // Cancel daily digest job
+    if (this.dailyDigestJob) {
+      this.dailyDigestJob.cancel();
+      this.dailyDigestJob = null;
     }
 
     // Cancel all scheduled jobs
@@ -394,6 +404,118 @@ export class ReminderScheduler {
       }
     } catch (error) {
       logger.error("Error checking for due reminders:", error);
+    }
+  }
+
+  /**
+   * Schedule daily digest to run at 8 AM every day
+   */
+  private scheduleDailyDigest(): void {
+    // Schedule for 8 AM every day
+    // Rule: { hour: 8, minute: 0 }
+    const rule = new schedule.RecurrenceRule();
+    rule.hour = 8;
+    rule.minute = 0;
+    rule.tz = "Asia/Kuwait"; // Default timezone
+
+    this.dailyDigestJob = schedule.scheduleJob(rule, async () => {
+      await this.sendDailyDigest();
+    });
+
+    logger.info("📅 Daily digest scheduled for 8:00 AM (Kuwait time)");
+  }
+
+  /**
+   * Send daily digest of all reminders for today
+   */
+  private async sendDailyDigest(): Promise<void> {
+    try {
+      logger.info("Sending daily digest...");
+
+      // Get all active reminders for today
+      const today = DateTime.now().setZone("Asia/Kuwait");
+      const startOfDay = today.startOf("day").toJSDate();
+      const endOfDay = today.endOf("day").toJSDate();
+
+      // Group reminders by chat
+      const reminders = await prisma.reminder.findMany({
+        where: {
+          reminderSent: false,
+          remindAtUtc: {
+            gte: startOfDay,
+            lte: endOfDay,
+          },
+        },
+        orderBy: {
+          remindAtUtc: "asc",
+        },
+      });
+
+      if (reminders.length === 0) {
+        logger.info("No reminders for today, skipping daily digest");
+        return;
+      }
+
+      // Group by chatId
+      const remindersByChat = new Map<string, typeof reminders>();
+      for (const reminder of reminders) {
+        const chatReminders = remindersByChat.get(reminder.chatId) || [];
+        chatReminders.push(reminder);
+        remindersByChat.set(reminder.chatId, chatReminders);
+      }
+
+      // Send digest to each chat
+      for (const [chatId, chatReminders] of remindersByChat.entries()) {
+        await this.sendChatDailyDigest(chatId, chatReminders);
+      }
+
+      logger.info(`✅ Daily digest sent to ${remindersByChat.size} chat(s)`);
+    } catch (error) {
+      logger.error("Error sending daily digest:", error);
+    }
+  }
+
+  /**
+   * Send daily digest to a specific chat
+   */
+  private async sendChatDailyDigest(
+    chatId: string,
+    reminders: any[]
+  ): Promise<void> {
+    if (!whatsappService) {
+      logger.warn("WhatsApp service not available for sending daily digest");
+      return;
+    }
+
+    try {
+      const today = DateTime.now().setZone("Asia/Kuwait");
+      const formattedDate = today.toFormat("EEEE, MMMM d, yyyy");
+
+      let message = `📅 *Good morning!*\n\n`;
+      message += `Here are your reminders for *${formattedDate}*:\n\n`;
+
+      for (const reminder of reminders) {
+        const localTime = DateTime.fromJSDate(reminder.remindAtUtc, {
+          zone: "utc",
+        })
+          .setZone(reminder.timezone)
+          .toFormat("h:mm a");
+
+        message += `- *${reminder.title}*\n`;
+        message += `    ${localTime}\n\n`;
+      }
+
+      message += `_You'll receive a notification 1h before each reminder._`;
+
+      await whatsappService.sendMessage(chatId, {
+        text: message,
+      });
+
+      logger.info(
+        `✅ Daily digest sent to chat ${chatId} (${reminders.length} reminders)`
+      );
+    } catch (error) {
+      logger.error(`Failed to send daily digest to chat ${chatId}:`, error);
     }
   }
 

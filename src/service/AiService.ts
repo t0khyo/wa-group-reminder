@@ -1,62 +1,107 @@
 import OpenAI from "openai";
 import logger from "../utils/logger.js";
 import { reminderService } from "./ReminderService.js";
+import { taskService } from "./TaskService.js";
 import dotenv from "dotenv";
 import { parseDateTime } from "../utils/DateParser.js";
 import { DEFAULT_TIMEZONE } from "../config/TimeZone.js";
+import { TaskStatus } from "../generated/prisma/client.js";
 dotenv.config();
 
 const prompt: string = `
-You're Gigi, a WhatsApp assistant who chats naturally like a friend.
+You're Gigi, a WhatsApp assistant who helps manage reminders and tasks naturally like a friend.
 
 CORE BEHAVIOR:
-- Keep it short (1-3 lines), casual, and friendly
+- Keep responses short (1-3 lines), casual, and friendly
 - Never reveal you're AI—chat like a human would
-- Never use your 
-- Reference previous messages naturally
-- Ask for missing info when needed
-- Confirm actions clearly
+- Reference previous messages naturally for context
+- Ask for missing info when needed (especially time for reminders)
+- Confirm actions clearly with specific details
+- Mirror the user's mood and energy level
 
 WHATSAPP FORMATTING:
-*bold* _italic_ ~strikethrough~ \`code\`
+*bold* for emphasis, _italic_ for subtle points, ~strikethrough~ for corrections
 - No indentation or extra spacing
-- Use line breaks to separate sections
-- Keep it compact and scannable
+- Use line breaks to separate sections clearly
+- Keep messages compact and scannable
+- Use bullet points with dashes (-)
 
-EMOJI USAGE:
-Use 1-2 emojis per message to enhance tone:
-- Positive: 😊 😎 😉
-- Funny: 😂 😅
-- Frustrated: 🙄 😤
-- Sad: 😔
+EMOJI USAGE (1-2 per message):
+Tasks: 📝 (create), 🟡 (pending), 🟢 (done), 🔴 (cancelled), ✅ (success)
+Reminders: ⏰ 📅 🔔 ⏱️
+Emotions: 😊 😎 😉 (positive), 😂 😅 (funny)
+Actions: 🗑️ (delete), ✏️ (edit),  📝 (list)
 
-TASKS & REMINDERS:
-- Create, list, update, cancel reminders/tasks
-- Extract dates/times from messages
-- Never assume time always use what the user explicitly states
-- Task Status indicators:
-  🟩 Done
-  🟨 Pending
-  🟥 Cancelled
-- One task per line
+TASKS:
+Tasks are to-do items WITHOUT specific deadlines.
 
-creating a reminder:
-Got it! I'll remind you on *December 15, 2025, at 3:00 PM*.
+Creating tasks:
+"Done! 📝 Created task *T-1* - Review proposal"
 
-listing reminders:
-  Here are your active reminders:
-  
-  - Client meeting
+Listing tasks:
+"Here are your pending tasks:
+
+🟨 *T-1* - Review proposal
+🟨 *T-2* - Call client
+   👤 Assigned to: John"
+
+Updating tasks:
+"Nice work! ✅ Task *T-1* is now complete."
+
+Task Status:
+- 🟡 Pending (not started)
+- 🟢 Done (completed)
+- 🔴 Cancelled (won't do)
+
+REMINDERS:
+Reminders are time-based notifications WITH specific dates/times.
+
+Creating reminders:
+"Got it! 😊 I'll remind you on *Tuesday, December 10, 2025, at 3:00 PM*."
+
+Listing reminders:
+"📅 Your active reminders:
+
+- Client meeting
   Dec 6, 2025, at 2:00 PM
 
-  - Team standup
-  Dec 10, 2025, at 10:00 AM
+- Team standup
+  Dec 10, 2025, at 10:00 AM"
 
-When canceling reminders:
-Cancelled! The client meeting reminder has been removed.
+Canceling reminders:
+"Cancelled! The client meeting reminder has been removed. ✅"
+
+IMPORTANT RULES:
+1. NEVER assume time - always ask if not explicitly stated
+2. Use exact times from function responses (include timezone)
+3. When listing items, format each on its own line with emoji
+4. For errors, be helpful and suggest what to do next
+5. Task IDs are formatted as "T-1", "T-2", etc.
+6. Always use *bold* for task numbers and dates/times
+7. Keep follow-up suggestions brief and natural
+
+EXAMPLES:
+
+User: "Add a task"
+You: "Sure! What's the task about?"
+
+User: "Remind me tomorrow"
+You: "Got it! What time tomorrow?"
+
+User: "Review the proposal"
+You: "Done! 📝 Created task *T-1* - Review the proposal"
+
+User: "Show my stuff"
+You: "Here's what you've got:
+
+*Tasks:*
+🟨 *T-1* - Review proposal
+
+*Reminders:*
+🟨 Client meeting - Dec 6, 2:00 PM"
 
 TONE:
-Mirror the user's vibe—joke with jokers, empathize with the sad. Be warm, slightly witty, totally human.
+Match the user's vibe—be professional with formal users, casual with casual users, supportive when they're stressed. Stay warm, helpful, and slightly witty.
 `.trim();
 
 interface Message {
@@ -80,6 +125,26 @@ interface ListRemindersParams {
 
 interface CancelReminderParams {
   reminder_id: string;
+}
+
+interface CreateTaskParams {
+  title: string;
+  assigned_to?: string[];
+}
+
+interface ListTasksParams {
+  status?: "Pending" | "Done" | "Cancelled" | "all";
+}
+
+interface UpdateTaskParams {
+  task_id: string;
+  status?: "Pending" | "Done" | "Cancelled";
+  title?: string;
+  assigned_to?: string[];
+}
+
+interface DeleteTaskParams {
+  task_id: string;
 }
 
 // Define available functions/tools for the AI
@@ -151,6 +216,97 @@ const availableFunctions: OpenAI.Chat.ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "create_task",
+      description:
+        "Create a new task in the chat. Tasks are to-do items without specific deadlines.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: {
+            type: "string",
+            description: "The task title/description",
+          },
+          assigned_to: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Optional array of user names or phone numbers to assign the task to",
+          },
+        },
+        required: ["title"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_tasks",
+      description:
+        "List all tasks for this chat. Can filter by status (Pending, Done, Cancelled, or all).",
+      parameters: {
+        type: "object",
+        properties: {
+          status: {
+            type: "string",
+            enum: ["Pending", "Done", "Cancelled", "all"],
+            description: "Filter tasks by status. Default is 'Pending'",
+          },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "update_task",
+      description:
+        "Update a task's status, title, or assignees. Use task_id from list_tasks.",
+      parameters: {
+        type: "object",
+        properties: {
+          task_id: {
+            type: "string",
+            description: "The ID of the task to update",
+          },
+          status: {
+            type: "string",
+            enum: ["Pending", "Done", "Cancelled"],
+            description: "New status for the task",
+          },
+          title: {
+            type: "string",
+            description: "New title for the task",
+          },
+          assigned_to: {
+            type: "array",
+            items: { type: "string" },
+            description: "New list of assigned users",
+          },
+        },
+        required: ["task_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_task",
+      description: "Delete a task permanently by its ID",
+      parameters: {
+        type: "object",
+        properties: {
+          task_id: {
+            type: "string",
+            description: "The ID of the task to delete",
+          },
+        },
+        required: ["task_id"],
+      },
+    },
+  },
 ];
 
 export class AiService {
@@ -191,6 +347,10 @@ export class AiService {
       "cancel_reminder",
       this.handleCancelReminder.bind(this)
     );
+    this.functionHandlers.set("create_task", this.handleCreateTask.bind(this));
+    this.functionHandlers.set("list_tasks", this.handleListTasks.bind(this));
+    this.functionHandlers.set("update_task", this.handleUpdateTask.bind(this));
+    this.functionHandlers.set("delete_task", this.handleDeleteTask.bind(this));
   }
 
   /**
@@ -314,6 +474,170 @@ export class AiService {
       return JSON.stringify({
         success: false,
         error: "Failed to cancel reminder: " + error.message,
+      });
+    }
+  }
+
+  /**
+   * Handler for creating a task
+   */
+  private async handleCreateTask(
+    args: CreateTaskParams,
+    chatId: string
+  ): Promise<string> {
+    try {
+      logger.info(`Creating task in chat ${chatId}:`, args);
+
+      const task = await taskService.createTask({
+        chatId,
+        title: args.title,
+        assignedTo: args.assigned_to || [],
+      });
+
+      const taskNumber = taskService.formatTaskId(task.taskId);
+      let message = `Task created: ${taskNumber}`;
+
+      if (args.assigned_to && args.assigned_to.length > 0) {
+        message += `\nAssigned to: ${args.assigned_to.join(", ")}`;
+      }
+
+      return JSON.stringify({
+        success: true,
+        task_id: task.id,
+        task_number: taskNumber,
+        message,
+        details: {
+          id: task.id,
+          taskId: task.taskId,
+          title: args.title,
+          assigned_to: args.assigned_to || [],
+        },
+      });
+    } catch (error: any) {
+      logger.error("Error creating task:", error);
+      return JSON.stringify({
+        success: false,
+        error: "Failed to create task: " + error.message,
+      });
+    }
+  }
+
+  /**
+   * Handler for listing tasks
+   */
+  private async handleListTasks(
+    args: ListTasksParams,
+    chatId: string
+  ): Promise<string> {
+    try {
+      logger.info(`Listing tasks for chat ${chatId}:`, args);
+
+      const status =
+        args.status === "all" ? undefined : (args.status as TaskStatus);
+      const tasks = await taskService.listTasks(chatId, status);
+
+      if (tasks.length === 0) {
+        return JSON.stringify({
+          success: true,
+          count: 0,
+          tasks: [],
+          message: `No ${args.status || "pending"} tasks found.`,
+        });
+      }
+
+      const formattedTasks = tasks.map((t) => ({
+        id: t.id,
+        task_number: taskService.formatTaskId(t.taskId),
+        title: t.title,
+        status: t.status,
+        assigned_to: t.assignedTo,
+        emoji: taskService.getStatusEmoji(t.status),
+      }));
+
+      return JSON.stringify({
+        success: true,
+        count: tasks.length,
+        tasks: formattedTasks,
+        message: `Found ${tasks.length} ${args.status || "pending"} task(s)`,
+      });
+    } catch (error: any) {
+      logger.error("Error listing tasks:", error);
+      return JSON.stringify({
+        success: false,
+        error: "Failed to list tasks: " + error.message,
+      });
+    }
+  }
+
+  /**
+   * Handler for updating a task
+   */
+  private async handleUpdateTask(
+    args: UpdateTaskParams,
+    chatId: string
+  ): Promise<string> {
+    try {
+      logger.info(`Updating task ${args.task_id} in chat ${chatId}:`, args);
+
+      const updateData: any = {};
+      if (args.status) updateData.status = args.status as TaskStatus;
+      if (args.title) updateData.title = args.title;
+      if (args.assigned_to) updateData.assignedTo = args.assigned_to;
+
+      const task = await taskService.updateTask(args.task_id, updateData);
+      const taskNumber = taskService.formatTaskId(task.taskId);
+
+      return JSON.stringify({
+        success: true,
+        task_id: task.id,
+        task_number: taskNumber,
+        message: `✅ Task ${taskNumber} updated successfully`,
+        details: {
+          id: task.id,
+          taskId: task.taskId,
+          title: task.title,
+          status: task.status,
+          assigned_to: task.assignedTo,
+        },
+      });
+    } catch (error: any) {
+      logger.error("Error updating task:", error);
+      return JSON.stringify({
+        success: false,
+        error: "Failed to update task: " + error.message,
+      });
+    }
+  }
+
+  /**
+   * Handler for deleting a task
+   */
+  private async handleDeleteTask(
+    args: DeleteTaskParams,
+    chatId: string
+  ): Promise<string> {
+    try {
+      logger.info(`Deleting task ${args.task_id} in chat ${chatId}`);
+
+      const success = await taskService.deleteTask(args.task_id);
+
+      if (success) {
+        return JSON.stringify({
+          success: true,
+          message: `🗑️ Task deleted successfully`,
+          task_id: args.task_id,
+        });
+      } else {
+        return JSON.stringify({
+          success: false,
+          error: `Task ${args.task_id} not found`,
+        });
+      }
+    } catch (error: any) {
+      logger.error("Error deleting task:", error);
+      return JSON.stringify({
+        success: false,
+        error: "Failed to delete task: " + error.message,
       });
     }
   }
