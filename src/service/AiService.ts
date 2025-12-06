@@ -8,6 +8,8 @@ import { DEFAULT_TIMEZONE } from "../config/TimeZone.js";
 import { TaskStatus } from "../generated/prisma/client.js";
 dotenv.config();
 
+const AI_MODEL = process.env.AI_MODEL || "gpt-5-nano";
+
 const prompt: string = `
 You're Gigi, a WhatsApp assistant who helps manage reminders and tasks naturally like a friend.
 
@@ -692,7 +694,7 @@ export class AiService {
 
       // Call OpenAI with function calling enabled
       let response = await this.client.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: AI_MODEL,
         messages: this.conversationHistory.get(userId)!,
         tools: availableFunctions,
         tool_choice: "auto", // Let the model decide when to call functions
@@ -747,7 +749,7 @@ export class AiService {
 
         // Get the next response from the model with function results
         response = await this.client.chat.completions.create({
-          model: "gpt-4o-mini",
+          model: AI_MODEL,
           messages: this.conversationHistory.get(userId)!,
           tools: availableFunctions,
           tool_choice: "auto",
