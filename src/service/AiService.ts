@@ -4,7 +4,6 @@ import { reminderService } from "./ReminderService.js";
 import { taskService } from "./TaskService.js";
 import dotenv from "dotenv";
 import { parseDateTime } from "../utils/DateParser.js";
-import { DEFAULT_TIMEZONE } from "../config/TimeZone.js";
 import { TaskStatus } from "../generated/prisma/client.js";
 dotenv.config();
 
@@ -18,6 +17,7 @@ CORE BEHAVIOR:
 - Never reveal you're AI—chat like a human would
 - Reference previous messages naturally for context
 - Ask for missing info when needed (especially time for reminders)
+- NEVER ask about timezone - the system is configured for Asia/Kuwait timezone
 - Confirm actions clearly with specific details
 - Mirror the user's mood and energy level
 
@@ -59,28 +59,31 @@ REMINDERS:
 Reminders are time-based notifications WITH specific dates/times.
 
 Creating reminders:
-"Got it! 😊 I'll remind you on *Tuesday, December 10, 2025, at 3:00 PM*."
+"Got it! 😊 I'll remind you on *7 Dec 2025 at 3:00 PM*."
+
+IMPORTANT: The system automatically uses Asia/Kuwait timezone. Users should specify times naturally (e.g., "tomorrow at 3pm", "in 2 hours", "next Monday at 10am") and you should NEVER ask about timezone.
 
 Listing reminders:
 "📅 Your active reminders:
 
-- Client meeting
-  Dec 6, 2025, at 2:00 PM
+- *Client meeting*
+  6 Dec 2025 at 2:00 PM
 
-- Team standup
-  Dec 10, 2025, at 10:00 AM"
+- *Team standup*
+  10 Dec 2025 at 10:00 AM"
 
 Canceling reminders:
 "Cancelled! The client meeting reminder has been removed. ✅"
 
 IMPORTANT RULES:
 1. NEVER assume time - always ask if not explicitly stated
-2. Use exact times from function responses (include timezone)
-3. When listing items, format each on its own line with emoji
-4. For errors, be helpful and suggest what to do next
-5. Task IDs are formatted as "T-1", "T-2", etc.
-6. Always use *bold* for task numbers and dates/times
-7. Keep follow-up suggestions brief and natural
+2. NEVER ask about timezone - system uses Asia/Kuwait timezone automatically
+3. Use exact times from function responses
+4. When listing items, format each on its own line with emoji
+5. For errors, be helpful and suggest what to do next
+6. Task IDs are formatted as "T-1", "T-2", etc.
+7. Always use *bold* for task numbers and dates/times
+8. Keep follow-up suggestions brief and natural
 
 EXAMPLES:
 
@@ -147,166 +150,155 @@ interface DeleteTaskParams {
   task_number: number; // Use the task number (1, 2, 3) instead of UUID
 }
 
-// Define available functions/tools for the AI
-const availableFunctions: OpenAI.Chat.ChatCompletionTool[] = [
+// Define available functions/tools for the AI (Responses API format)
+const availableFunctions: any[] = [
   {
     type: "function",
-    function: {
-      name: "create_reminder",
-      description:
-        "Create a reminder that will be sent to the WhatsApp group at a specific date and time. " +
-        "The reminder will mention specific users if provided.",
-      parameters: {
-        type: "object",
-        properties: {
-          message: {
-            type: "string",
-            description: "The reminder message to send",
-          },
-          datetime: {
-            type: "string",
-            description:
-              "When to send the reminder. Supports natural language like: 'in 2 hours', 'tomorrow at 3pm', " +
-              "'next Monday at 10am', 'Dec 15 at 2:30pm', or ISO format '2024-12-15T14:30:00Z'. " +
-              "Use the exact time expression from the user's message.",
-          },
-          mentions: {
-            type: "array",
-            items: { type: "string" },
-            description:
-              "Optional array of user phone numbers or names to mention in the reminder",
-          },
+    name: "create_reminder",
+    description:
+      "Create a reminder that will be sent to the WhatsApp group at a specific date and time. " +
+      "The reminder will mention specific users if provided.",
+    parameters: {
+      type: "object",
+      properties: {
+        message: {
+          type: "string",
+          description: "The reminder message to send",
         },
-        required: ["message", "datetime"],
+        datetime: {
+          type: "string",
+          description:
+            "Extract the exact datetime phrase *as written by the user*, without modifying or interpreting it. " +
+            "Do NOT convert formats. Do NOT standardize. Do NOT parse. Return the raw text the user typed " +
+            "for when the reminder should be sent.",
+        },
+        mentions: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Optional array of user phone numbers or names to mention in the reminder",
+        },
       },
+      required: ["message", "datetime"],
+      additionalProperties: false,
     },
   },
   {
     type: "function",
-    function: {
-      name: "list_reminders",
-      description:
-        "List all reminders for this chat. Can filter by status (active, completed, or all).",
-      parameters: {
-        type: "object",
-        properties: {
-          status: {
-            type: "string",
-            enum: ["active", "completed", "all"],
-            description: "Filter reminders by status. Default is 'active'",
-          },
+    name: "list_reminders",
+    description:
+      "List all reminders for this chat. Can filter by status (active, completed, or all).",
+    parameters: {
+      type: "object",
+      properties: {
+        status: {
+          type: "string",
+          enum: ["active", "completed", "all"],
+          description: "Filter reminders by status. Default is 'active'",
         },
       },
+      additionalProperties: false,
     },
   },
   {
     type: "function",
-    function: {
-      name: "cancel_reminder",
-      description: "Cancel an existing reminder by its ID",
-      parameters: {
-        type: "object",
-        properties: {
-          reminder_id: {
-            type: "string",
-            description: "The ID of the reminder to cancel",
-          },
+    name: "cancel_reminder",
+    description: "Cancel an existing reminder by its ID",
+    parameters: {
+      type: "object",
+      properties: {
+        reminder_id: {
+          type: "string",
+          description: "The ID of the reminder to cancel",
         },
-        required: ["reminder_id"],
       },
+      required: ["reminder_id"],
+      additionalProperties: false,
     },
   },
   {
     type: "function",
-    function: {
-      name: "create_task",
-      description:
-        "Create a new task in the chat. Tasks are to-do items without specific deadlines.",
-      parameters: {
-        type: "object",
-        properties: {
-          title: {
-            type: "string",
-            description: "The task title/description",
-          },
-          assigned_to: {
-            type: "array",
-            items: { type: "string" },
-            description:
-              "Optional array of user names or phone numbers to assign the task to",
-          },
+    name: "create_task",
+    description:
+      "Create a new task in the chat. Tasks are to-do items without specific deadlines.",
+    parameters: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          description: "The task title/description",
         },
-        required: ["title"],
+        assigned_to: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Optional array of user names or phone numbers to assign the task to",
+        },
       },
+      required: ["title"],
+      additionalProperties: false,
     },
   },
   {
     type: "function",
-    function: {
-      name: "list_tasks",
-      description:
-        "List all tasks for this chat. Can filter by status (Pending, Done, Cancelled, or all).",
-      parameters: {
-        type: "object",
-        properties: {
-          status: {
-            type: "string",
-            enum: ["Pending", "Done", "Cancelled", "all"],
-            description: "Filter tasks by status. Default is 'all'",
-          },
+    name: "list_tasks",
+    description:
+      "List all tasks for this chat. Can filter by status (Pending, Done, Cancelled, or all).",
+    parameters: {
+      type: "object",
+      properties: {
+        status: {
+          type: "string",
+          enum: ["Pending", "Done", "Cancelled", "all"],
+          description: "Filter tasks by status. Default is 'all'",
         },
       },
+      additionalProperties: false,
     },
   },
   {
     type: "function",
-    function: {
-      name: "update_task",
-      description:
-        "Update a task's status. Use task_number from list_tasks (e.g., 1, 2, 3).",
-      parameters: {
-        type: "object",
-        properties: {
-          task_number: {
-            type: "number",
-            description: "The task number (e.g., 1, 2, 3) - NOT the UUID",
-          },
-          status: {
-            type: "string",
-            enum: ["Pending", "Done", "Cancelled"],
-            description: "New status for the task",
-          },
+    name: "update_task",
+    description:
+      "Update a task's status. Use task_number from list_tasks (e.g., 1, 2, 3).",
+    parameters: {
+      type: "object",
+      properties: {
+        task_number: {
+          type: "number",
+          description: "The task number (e.g., 1, 2, 3) - NOT the UUID",
         },
-        required: ["task_number", "status"],
+        status: {
+          type: "string",
+          enum: ["Pending", "Done", "Cancelled"],
+          description: "New status for the task",
+        },
       },
+      required: ["task_number", "status"],
+      additionalProperties: false,
     },
   },
   {
     type: "function",
-    function: {
-      name: "delete_task",
-      description: "Delete a task permanently by its number (e.g., 1, 2, 3)",
-      parameters: {
-        type: "object",
-        properties: {
-          task_number: {
-            type: "number",
-            description: "The task number (e.g., 1, 2, 3) - NOT the UUID",
-          },
+    name: "delete_task",
+    description: "Delete a task permanently by its number (e.g., 1, 2, 3)",
+    parameters: {
+      type: "object",
+      properties: {
+        task_number: {
+          type: "number",
+          description: "The task number (e.g., 1, 2, 3) - NOT the UUID",
         },
-        required: ["task_number"],
       },
+      required: ["task_number"],
+      additionalProperties: false,
     },
   },
 ];
 
 export class AiService {
   private client: OpenAI;
-  private conversationHistory: Map<
-    string,
-    OpenAI.Chat.ChatCompletionMessageParam[]
-  > = new Map();
-  private readonly maxHistoryLength: number = 20;
+  private previousResponseIds: Map<string, string> = new Map();
   private functionHandlers: Map<
     string,
     (args: any, chatId: string) => Promise<string>
@@ -354,17 +346,14 @@ export class AiService {
     try {
       logger.info(`Creating reminder in chat ${chatId}:`, args);
 
-      // Parse the datetime string (defaults to DEFAULT_TIMEZONE)
       const scheduledTime = parseDateTime(args.datetime);
 
-      // Create the reminder with timezone
       const reminder = await reminderService.createReminder(
         chatId,
         args.message,
         scheduledTime.utc,
         args.mentions || [],
-        "system",
-        scheduledTime.timezone
+        "system"
       );
 
       return JSON.stringify({
@@ -379,7 +368,7 @@ export class AiService {
         },
       });
     } catch (error: any) {
-      logger.error("Error creating reminder:", error);
+      logger.error("Error creating reminder:", error.toString());
       return JSON.stringify({
         success: false,
         error: "Failed to create reminder: " + error.message,
@@ -667,104 +656,77 @@ export class AiService {
     logger.info(`AI processing text from user ${userId}: "${text}"`);
 
     try {
-      // Get or initialize conversation history for this user
-      if (!this.conversationHistory.has(userId)) {
-        this.conversationHistory.set(userId, [
-          {
-            role: "system",
-            content: prompt,
-          },
-        ]);
-      }
+      // Get previous response ID for this user (if any)
+      const previousResponseId = this.previousResponseIds.get(userId);
 
-      const history = this.conversationHistory.get(userId)!;
-
-      // Add user's message to history
-      history.push({ role: "user", content: text });
-
-      // Trim history if it gets too long (keep system message + last N messages)
-      if (history.length > this.maxHistoryLength) {
-        const systemMessage = history[0];
-        const recentMessages = history.slice(-this.maxHistoryLength + 1);
-        this.conversationHistory.set(userId, [
-          systemMessage,
-          ...recentMessages,
-        ]);
-      }
-
-      // Call OpenAI with function calling enabled
-      let response = await this.client.chat.completions.create({
+      // Call OpenAI Responses API with function calling enabled
+      let response = await this.client.responses.create({
         model: AI_MODEL,
-        messages: this.conversationHistory.get(userId)!,
+        instructions: prompt,
+        input: text,
         tools: availableFunctions,
-        tool_choice: "auto", // Let the model decide when to call functions
+        store: true, // Enable statefulness for better reasoning
+        previous_response_id: previousResponseId, // Chain with previous conversation
       });
 
-      let assistantMessage = response.choices[0].message;
+      // Process the response output for function calls
+      let needsFollowUp = false;
+      const functionOutputs: any[] = [];
 
-      // Handle function calls (the model can call multiple tools)
-      while (
-        assistantMessage.tool_calls &&
-        assistantMessage.tool_calls.length > 0
-      ) {
-        // Add assistant's message with tool calls to history
-        history.push(assistantMessage);
+      for (const item of response.output) {
+        // Handle function calls
+        if (item.type === "function_call") {
+          needsFollowUp = true;
+          const functionName = item.name;
+          const functionArgs = JSON.parse(item.arguments);
 
-        // Process each tool call
-        for (const toolCall of assistantMessage.tool_calls) {
-          // Handle function tool calls
-          if (toolCall.type === "function") {
-            const functionName = toolCall.function.name;
-            const functionArgs = JSON.parse(toolCall.function.arguments);
+          logger.info(
+            `AI requested function call: ${functionName}`,
+            functionArgs
+          );
 
-            logger.info(
-              `AI requested function call: ${functionName}`,
-              functionArgs
-            );
+          // Execute the function
+          const functionHandler = this.functionHandlers.get(functionName);
+          let functionResponse: string;
 
-            // Execute the function
-            const functionHandler = this.functionHandlers.get(functionName);
-            let functionResponse: string;
-
-            if (functionHandler) {
-              functionResponse = await functionHandler(functionArgs, userId);
-            } else {
-              functionResponse = JSON.stringify({
-                success: false,
-                error: `Unknown function: ${functionName}`,
-              });
-            }
-
-            // Add function response to history
-            history.push({
-              role: "tool",
-              tool_call_id: toolCall.id,
-              content: functionResponse,
+          if (functionHandler) {
+            functionResponse = await functionHandler(functionArgs, userId);
+          } else {
+            functionResponse = JSON.stringify({
+              success: false,
+              error: `Unknown function: ${functionName}`,
             });
-
-            logger.info(`Function ${functionName} response:`, functionResponse);
           }
+
+          // Store function output for follow-up request
+          functionOutputs.push({
+            type: "function_call_output",
+            call_id: item.call_id,
+            output: functionResponse,
+          });
+
+          logger.info(`Function ${functionName} response: ${functionResponse}`);
         }
+      }
 
-        // Get the next response from the model with function results
-        response = await this.client.chat.completions.create({
+      // If functions were called, make a follow-up request with the results
+      if (needsFollowUp) {
+        response = await this.client.responses.create({
           model: AI_MODEL,
-          messages: this.conversationHistory.get(userId)!,
+          instructions: prompt,
+          input: functionOutputs,
+          previous_response_id: response.id, // Chain with the function call response
           tools: availableFunctions,
-          tool_choice: "auto",
+          store: true,
         });
-
-        assistantMessage = response.choices[0].message;
       }
 
-      // Extract final reply
+      // Store this response ID for future conversation continuity
+      this.previousResponseIds.set(userId, response.id);
+
+      // Extract final reply using the helper
       const reply =
-        assistantMessage.content || "Sorry, I couldn't generate a reply.";
-
-      // Add final assistant's reply to history
-      if (!assistantMessage.tool_calls) {
-        history.push({ role: "assistant", content: reply });
-      }
+        response.output_text || "Sorry, I couldn't generate a reply.";
 
       return reply;
     } catch (err: any) {
@@ -779,7 +741,7 @@ export class AiService {
    * @param userId - User/chat identifier
    */
   public clearHistory(userId: string): void {
-    this.conversationHistory.delete(userId);
+    this.previousResponseIds.delete(userId);
     logger.info(`Cleared conversation history for user ${userId}`);
   }
 
@@ -787,7 +749,7 @@ export class AiService {
    * Clear all conversation histories (useful for memory management)
    */
   public clearAllHistories(): void {
-    this.conversationHistory.clear();
+    this.previousResponseIds.clear();
     logger.info("Cleared all conversation histories");
   }
 }
