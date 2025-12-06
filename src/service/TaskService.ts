@@ -74,8 +74,7 @@ export class TaskService {
       const tasks = await prisma.tasks.findMany({
         where: whereClause,
         orderBy: [
-          { status: "asc" }, // Pending first, then Done, then Cancelled
-          { createdAt: "desc" },
+          { taskId: "asc" }, // Pending first, then Done, then Cancelled
         ],
       });
 
@@ -155,24 +154,10 @@ export class TaskService {
   }
 
   /**
-   * Mark task as done
+   * Update task status
    */
-  async markAsDone(taskId: string): Promise<TaskDto> {
-    return this.updateTask(taskId, { status: TaskStatus.Done });
-  }
-
-  /**
-   * Mark task as cancelled
-   */
-  async markAsCancelled(taskId: string): Promise<TaskDto> {
-    return this.updateTask(taskId, { status: TaskStatus.Cancelled });
-  }
-
-  /**
-   * Reopen a task (mark as pending)
-   */
-  async reopenTask(taskId: string): Promise<TaskDto> {
-    return this.updateTask(taskId, { status: TaskStatus.Pending });
+  async updateTaskStatus(taskId: string, status: TaskStatus): Promise<TaskDto> {
+    return this.updateTask(taskId, { status });
   }
 
   /**

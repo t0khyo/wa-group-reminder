@@ -41,8 +41,8 @@ Creating tasks:
 Listing tasks:
 "Here are your pending tasks:
 
-🟨 *T-1* - Review proposal
-🟨 *T-2* - Call client
+🟡 *T-1* - Review proposal
+🟡 *T-2* - Call client
    👤 Assigned to: John"
 
 Updating tasks:
@@ -137,14 +137,12 @@ interface ListTasksParams {
 }
 
 interface UpdateTaskParams {
-  task_id: string;
-  status?: "Pending" | "Done" | "Cancelled";
-  title?: string;
-  assigned_to?: string[];
+  task_number: number; // Use the task number (1, 2, 3) instead of UUID
+  status: "Pending" | "Done" | "Cancelled";
 }
 
 interface DeleteTaskParams {
-  task_id: string;
+  task_number: number; // Use the task number (1, 2, 3) instead of UUID
 }
 
 // Define available functions/tools for the AI
@@ -252,7 +250,7 @@ const availableFunctions: OpenAI.Chat.ChatCompletionTool[] = [
           status: {
             type: "string",
             enum: ["Pending", "Done", "Cancelled", "all"],
-            description: "Filter tasks by status. Default is 'Pending'",
+            description: "Filter tasks by status. Default is 'all'",
           },
         },
       },
@@ -263,30 +261,21 @@ const availableFunctions: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "update_task",
       description:
-        "Update a task's status, title, or assignees. Use task_id from list_tasks.",
+        "Update a task's status. Use task_number from list_tasks (e.g., 1, 2, 3).",
       parameters: {
         type: "object",
         properties: {
-          task_id: {
-            type: "string",
-            description: "The ID of the task to update",
+          task_number: {
+            type: "number",
+            description: "The task number (e.g., 1, 2, 3) - NOT the UUID",
           },
           status: {
             type: "string",
             enum: ["Pending", "Done", "Cancelled"],
             description: "New status for the task",
           },
-          title: {
-            type: "string",
-            description: "New title for the task",
-          },
-          assigned_to: {
-            type: "array",
-            items: { type: "string" },
-            description: "New list of assigned users",
-          },
         },
-        required: ["task_id"],
+        required: ["task_number", "status"],
       },
     },
   },
@@ -294,16 +283,16 @@ const availableFunctions: OpenAI.Chat.ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "delete_task",
-      description: "Delete a task permanently by its ID",
+      description: "Delete a task permanently by its number (e.g., 1, 2, 3)",
       parameters: {
         type: "object",
         properties: {
-          task_id: {
-            type: "string",
-            description: "The ID of the task to delete",
+          task_number: {
+            type: "number",
+            description: "The task number (e.g., 1, 2, 3) - NOT the UUID",
           },
         },
-        required: ["task_id"],
+        required: ["task_number"],
       },
     },
   },
@@ -570,34 +559,43 @@ export class AiService {
   }
 
   /**
-   * Handler for updating a task
+   * Handler for updating a task status
    */
   private async handleUpdateTask(
     args: UpdateTaskParams,
     chatId: string
   ): Promise<string> {
     try {
-      logger.info(`Updating task ${args.task_id} in chat ${chatId}:`, args);
+      logger.info(`Updating task ${args.task_number} in chat ${chatId}:`, args);
 
-      const updateData: any = {};
-      if (args.status) updateData.status = args.status as TaskStatus;
-      if (args.title) updateData.title = args.title;
-      if (args.assigned_to) updateData.assignedTo = args.assigned_to;
+      // Get task by number
+      const task = await taskService.getTaskByNumber(args.task_number, chatId);
 
-      const task = await taskService.updateTask(args.task_id, updateData);
-      const taskNumber = taskService.formatTaskId(task.taskId);
+      if (!task) {
+        return JSON.stringify({
+          success: false,
+          error: `Task #${args.task_number} not found`,
+        });
+      }
+
+      // Update only the status
+      const updatedTask = await taskService.updateTaskStatus(
+        task.id,
+        args.status as TaskStatus
+      );
+      const taskNumber = taskService.formatTaskId(updatedTask.taskId);
 
       return JSON.stringify({
         success: true,
-        task_id: task.id,
+        task_id: updatedTask.id,
         task_number: taskNumber,
-        message: `✅ Task ${taskNumber} updated successfully`,
+        message: `✅ Task ${taskNumber} status updated to ${args.status}`,
         details: {
-          id: task.id,
-          taskId: task.taskId,
-          title: task.title,
-          status: task.status,
-          assigned_to: task.assignedTo,
+          id: updatedTask.id,
+          taskId: updatedTask.taskId,
+          title: updatedTask.title,
+          status: updatedTask.status,
+          assigned_to: updatedTask.assignedTo,
         },
       });
     } catch (error: any) {
@@ -612,25 +610,40 @@ export class AiService {
   /**
    * Handler for deleting a task
    */
+  /**
+   * Handler for deleting a task
+   */
   private async handleDeleteTask(
     args: DeleteTaskParams,
     chatId: string
   ): Promise<string> {
     try {
-      logger.info(`Deleting task ${args.task_id} in chat ${chatId}`);
+      logger.info(`Deleting task ${args.task_number} in chat ${chatId}`);
 
-      const success = await taskService.deleteTask(args.task_id);
+      // Get task by number
+      const task = await taskService.getTaskByNumber(args.task_number, chatId);
+
+      if (!task) {
+        return JSON.stringify({
+          success: false,
+          error: `Task #${args.task_number} not found`,
+        });
+      }
+
+      const success = await taskService.deleteTask(task.id);
 
       if (success) {
         return JSON.stringify({
           success: true,
-          message: `🗑️ Task deleted successfully`,
-          task_id: args.task_id,
+          message: `🗑️ Task ${taskService.formatTaskId(
+            args.task_number
+          )} deleted successfully`,
+          task_number: args.task_number,
         });
       } else {
         return JSON.stringify({
           success: false,
-          error: `Task ${args.task_id} not found`,
+          error: `Failed to delete task #${args.task_number}`,
         });
       }
     } catch (error: any) {

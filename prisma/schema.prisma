@@ -32,3 +32,25 @@ model Reminder {
   @@index([chatId, remindAtUtc])
 }
 
+enum TaskStatus {
+  Pending
+  Done
+  Cancelled
+}
+
+model Tasks {
+  id        String   @id @default(uuid())
+  taskId    Int      @default(autoincrement())
+  chatId    String
+  senderId  String?
+  title     String
+  assignedTo String[]
+  status    TaskStatus @default(Pending)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([chatId])
+  @@index([status])
+  @@map("tasks")
+}
+
