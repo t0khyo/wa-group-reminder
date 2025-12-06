@@ -59,6 +59,13 @@ export class ReminderService {
     createdBy: string = "system",
     timezone: string = DEFAULT_TIMEZONE
   ): Promise<ReminderDto> {
+    let sent24hReminder = false;
+    const tomorrowMidnight = DateTime.now().plus({ days: 1 }).startOf("day");
+
+    if (scheduledTime < tomorrowMidnight.toJSDate()) {
+      sent24hReminder = true;
+    }
+
     const reminder = await prisma.reminder.create({
       data: {
         chatId,
@@ -67,6 +74,7 @@ export class ReminderService {
         mentions,
         remindAtUtc: scheduledTime,
         timezone,
+        reminder24hSent: sent24hReminder,
       },
     });
 
