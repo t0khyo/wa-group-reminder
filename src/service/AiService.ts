@@ -698,7 +698,6 @@ export class AiService {
         messages: this.conversationHistory.get(userId)!,
         tools: availableFunctions,
         tool_choice: "auto", // Let the model decide when to call functions
-        temperature: 0.7,
       });
 
       let assistantMessage = response.choices[0].message;
@@ -753,7 +752,6 @@ export class AiService {
           messages: this.conversationHistory.get(userId)!,
           tools: availableFunctions,
           tool_choice: "auto",
-          temperature: 0.7,
         });
 
         assistantMessage = response.choices[0].message;
