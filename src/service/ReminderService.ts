@@ -11,6 +11,8 @@ import { reminderScheduler } from "../sheduler/ReminderScheduler.js";
  */
 export interface ReminderDto {
   id: string;
+  reminderId: number;
+  reminderNumber: string; // Formatted as R-1, R-2, etc.
   chatId: string;
   message: string;
   scheduledTime: Date;
@@ -23,6 +25,30 @@ export interface ReminderDto {
 }
 
 export class ReminderService {
+  /**
+   * Format reminder ID as R-1, R-2, etc.
+   */
+  public formatReminderId(reminderId: number): string {
+    return `R-${reminderId}`;
+  }
+
+  /**
+   * Get a reminder by its number (not UUID)
+   */
+  async getReminderByNumber(
+    reminderNumber: number,
+    chatId: string
+  ): Promise<Reminder | null> {
+    const reminder = await prisma.reminder.findFirst({
+      where: {
+        reminderId: reminderNumber,
+        chatId,
+      },
+    });
+
+    return reminder;
+  }
+
   /**
    * Convert Prisma Reminder model to ReminderDto
    */
@@ -37,6 +63,8 @@ export class ReminderService {
 
     return {
       id: reminder.id,
+      reminderId: reminder.reminderId,
+      reminderNumber: this.formatReminderId(reminder.reminderId),
       chatId: reminder.chatId,
       message: reminder.title,
       scheduledTime: reminder.remindAtUtc,
@@ -116,7 +144,7 @@ export class ReminderService {
       orderBy: { remindAtUtc: "asc" },
     });
 
-    return reminders.map(this.toReminderDto);
+    return reminders.map((r) => this.toReminderDto(r));
   }
 
   /**
@@ -128,6 +156,75 @@ export class ReminderService {
     });
 
     return reminder ? this.toReminderDto(reminder) : null;
+  }
+
+  /**
+   * Update a reminder's time and/or message
+   */
+  async updateReminder(
+    reminderId: string,
+    updates: {
+      message?: string;
+      scheduledTime?: Date;
+    }
+  ): Promise<ReminderDto | null> {
+    try {
+      const reminder = await prisma.reminder.findUnique({
+        where: { id: reminderId },
+      });
+
+      if (!reminder) {
+        logger.warn(`Reminder ${reminderId} not found`);
+        return null;
+      }
+
+      if (reminder.reminderSent) {
+        logger.warn(`Reminder ${reminderId} is already completed`);
+        return null;
+      }
+
+      // Prepare update data
+      const updateData: any = {};
+
+      if (updates.message !== undefined) {
+        updateData.title = updates.message;
+      }
+
+      if (updates.scheduledTime !== undefined) {
+        updateData.remindAtUtc = updates.scheduledTime;
+
+        // Recalculate 24h reminder flag
+        const tomorrowMidnight = DateTime.now()
+          .plus({ days: 1 })
+          .startOf("day");
+        updateData.reminder24hSent =
+          updates.scheduledTime < tomorrowMidnight.toJSDate();
+      }
+
+      // Update the reminder
+      const updatedReminder = await prisma.reminder.update({
+        where: { id: reminderId },
+        data: updateData,
+      });
+
+      logger.info(`Updated reminder ${reminderId}`);
+
+      // Reschedule jobs if time was updated
+      if (updates.scheduledTime !== undefined) {
+        reminderScheduler.cancelReminder(reminderId);
+        await reminderScheduler.addReminder(
+          updatedReminder.id,
+          updatedReminder.remindAtUtc,
+          updatedReminder.reminder24hSent,
+          updatedReminder.reminder1hSent
+        );
+      }
+
+      return this.toReminderDto(updatedReminder);
+    } catch (error) {
+      logger.error(`Error updating reminder ${reminderId}:`, error);
+      return null;
+    }
   }
 
   /**
@@ -264,35 +361,6 @@ export class ReminderService {
     logger.info(`Cleaned up ${result.count} old reminders`);
     return result.count;
   }
-
-  // formatReminderId(id: number): string {
-  //   return `R-${id}`;
-  // }
-
-  // toReminderResponse(reminder: Reminder): ReminderResponse {
-  //   return {
-  //     reminderId: this.formatReminderId(reminder.reminderId),
-  //     chatId: reminder.chatId,
-  //     senderId: reminder.senderId || undefined,
-  //     title: reminder.title,
-  //     mentions: reminder.mentions,
-  //     remindAtUtc: reminder.remindAtUtc,
-  //     remindAtLocal: this.reminderLocalTime(
-  //       reminder.remindAtUtc,
-  //       reminder.timezone
-  //     ),
-  //     reminder1hSent: reminder.reminder1hSent,
-  //     reminder24hSent: reminder.reminder24hSent,
-  //     reminderSent: reminder.reminderSent,
-  //   };
-  // }
-
-  // reminderLocalTime(remindAtUtc: Date, timezone: string): string {
-  //   return DateTime.fromJSDate(remindAtUtc, { zone: "utc" })
-  //     .setZone(timezone)
-  //     .toISO();
-  // }
 }
 
-// Singleton instance
 export const reminderService = new ReminderService();

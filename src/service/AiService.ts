@@ -66,14 +66,17 @@ IMPORTANT: The system automatically uses Asia/Kuwait timezone. Users should spec
 Listing reminders:
 "📅 Your active reminders:
 
-- *Client meeting*
+- *R-1* Client meeting
   6 Dec 2025 at 2:00 PM
 
-- *Team standup*
+- *R-2* Team standup
   10 Dec 2025 at 10:00 AM"
 
+Updating reminders:
+"Updated! ✅ Changed *R-1* time to *7 Dec 2025 at 4:00 PM*."
+
 Canceling reminders:
-"Cancelled! The client meeting reminder has been removed. ✅"
+"Cancelled! Reminder *R-1* has been removed. ✅"
 
 IMPORTANT RULES:
 1. NEVER assume time - always ask if not explicitly stated
@@ -82,8 +85,9 @@ IMPORTANT RULES:
 4. When listing items, format each on its own line with emoji
 5. For errors, be helpful and suggest what to do next
 6. Task IDs are formatted as "T-1", "T-2", etc.
-7. Always use *bold* for task numbers and dates/times
-8. Keep follow-up suggestions brief and natural
+7. Reminder IDs are formatted as "R-1", "R-2", etc.
+8. Always use *bold* for task/reminder numbers and dates/times
+9. Keep follow-up suggestions brief and natural
 
 EXAMPLES:
 
@@ -103,7 +107,7 @@ You: "Here's what you've got:
 🟡 *T-1* - Review proposal
 
 *Reminders:*
-🟡 Client meeting - Dec 6, 2:00 PM"
+⏰ *R-1* - Client meeting - 6 Dec at 2:00 PM"
 
 TONE:
 Match the user's vibe—be professional with formal users, casual with casual users, supportive when they're stressed. Stay warm, helpful, and slightly witty.
@@ -129,7 +133,13 @@ interface ListRemindersParams {
 }
 
 interface CancelReminderParams {
-  reminder_id: string;
+  reminder_number: number;
+}
+
+interface UpdateReminderParams {
+  reminder_number: number;
+  message?: string;
+  datetime?: string;
 }
 
 interface CreateTaskParams {
@@ -203,16 +213,43 @@ const availableFunctions: any[] = [
   {
     type: "function",
     name: "cancel_reminder",
-    description: "Cancel an existing reminder by its ID",
+    description: "Cancel an existing reminder by its number (e.g., 1, 2, 3)",
     parameters: {
       type: "object",
       properties: {
-        reminder_id: {
-          type: "string",
-          description: "The ID of the reminder to cancel",
+        reminder_number: {
+          type: "number",
+          description: "The reminder number (e.g., 1, 2, 3) - NOT the UUID",
         },
       },
-      required: ["reminder_id"],
+      required: ["reminder_number"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "update_reminder",
+    description:
+      "Update an existing reminder's message or time. At least one field (message or datetime) must be provided.",
+    parameters: {
+      type: "object",
+      properties: {
+        reminder_number: {
+          type: "number",
+          description: "The reminder number (e.g., 1, 2, 3) - NOT the UUID",
+        },
+        message: {
+          type: "string",
+          description: "New reminder message (optional)",
+        },
+        datetime: {
+          type: "string",
+          description:
+            "New datetime for the reminder. Extract the exact datetime phrase *as written by the user*, " +
+            "without modifying or interpreting it. Return the raw text the user typed (optional).",
+        },
+      },
+      required: ["reminder_number"],
       additionalProperties: false,
     },
   },
@@ -330,6 +367,10 @@ export class AiService {
       "cancel_reminder",
       this.handleCancelReminder.bind(this)
     );
+    this.functionHandlers.set(
+      "update_reminder",
+      this.handleUpdateReminder.bind(this)
+    );
     this.functionHandlers.set("create_task", this.handleCreateTask.bind(this));
     this.functionHandlers.set("list_tasks", this.handleListTasks.bind(this));
     this.functionHandlers.set("update_task", this.handleUpdateTask.bind(this));
@@ -358,10 +399,10 @@ export class AiService {
 
       return JSON.stringify({
         success: true,
-        reminder_id: reminder.id,
+        reminder_number: reminder.reminderNumber,
         message: `Reminder created! I'll remind you on ${reminder.scheduledTimeLocal}`,
         details: {
-          id: reminder.id,
+          reminder_number: reminder.reminderNumber,
           message: args.message,
           scheduled_time: reminder.scheduledTimeLocal,
           mentions: args.mentions || [],
@@ -402,6 +443,7 @@ export class AiService {
 
       const formattedReminders = reminders.map((r) => ({
         id: r.id,
+        reminder_number: reminderService.formatReminderId(r.reminderId),
         message: r.message,
         scheduled_time: r.scheduledTimeLocal,
         status: r.status,
@@ -433,20 +475,38 @@ export class AiService {
     chatId: string
   ): Promise<string> {
     try {
-      logger.info(`Canceling reminder ${args.reminder_id} in chat ${chatId}`);
+      logger.info(
+        `Canceling reminder ${args.reminder_number} in chat ${chatId}`
+      );
 
-      const success = await reminderService.cancelReminder(args.reminder_id);
+      // Get reminder by number
+      const reminder = await reminderService.getReminderByNumber(
+        args.reminder_number,
+        chatId
+      );
+
+      if (!reminder) {
+        return JSON.stringify({
+          success: false,
+          error: `Reminder #${args.reminder_number} not found`,
+        });
+      }
+
+      const success = await reminderService.cancelReminder(reminder.id);
+      const reminderNumber = reminderService.formatReminderId(
+        args.reminder_number
+      );
 
       if (success) {
         return JSON.stringify({
           success: true,
-          message: `✅ Reminder ${args.reminder_id} has been cancelled`,
-          reminder_id: args.reminder_id,
+          message: `✅ Reminder ${reminderNumber} has been cancelled`,
+          reminder_number: reminderNumber,
         });
       } else {
         return JSON.stringify({
           success: false,
-          error: `Reminder ${args.reminder_id} not found or already completed/cancelled`,
+          error: `Reminder ${reminderNumber} not found or already completed/cancelled`,
         });
       }
     } catch (error: any) {
@@ -454,6 +514,88 @@ export class AiService {
       return JSON.stringify({
         success: false,
         error: "Failed to cancel reminder: " + error.message,
+      });
+    }
+  }
+
+  /**
+   * Handler for updating a reminder
+   */
+  private async handleUpdateReminder(
+    args: UpdateReminderParams,
+    chatId: string
+  ): Promise<string> {
+    try {
+      logger.info(
+        `Updating reminder ${args.reminder_number} in chat ${chatId}:`,
+        args
+      );
+
+      // Validate that at least one field is being updated
+      if (!args.message && !args.datetime) {
+        return JSON.stringify({
+          success: false,
+          error:
+            "At least one field (message or datetime) must be provided to update",
+        });
+      }
+
+      // Get reminder by number
+      const reminder = await reminderService.getReminderByNumber(
+        args.reminder_number,
+        chatId
+      );
+
+      if (!reminder) {
+        return JSON.stringify({
+          success: false,
+          error: `Reminder #${args.reminder_number} not found`,
+        });
+      }
+
+      const updates: { message?: string; scheduledTime?: Date } = {};
+
+      if (args.message) {
+        updates.message = args.message;
+      }
+
+      if (args.datetime) {
+        const scheduledTime = parseDateTime(args.datetime);
+        updates.scheduledTime = scheduledTime.utc;
+      }
+
+      const updatedReminder = await reminderService.updateReminder(
+        reminder.id,
+        updates
+      );
+
+      if (updatedReminder) {
+        let updateDetails = [];
+        if (args.message) updateDetails.push(`message to "${args.message}"`);
+        if (args.datetime)
+          updateDetails.push(`time to ${updatedReminder.scheduledTimeLocal}`);
+
+        return JSON.stringify({
+          success: true,
+          reminder_number: updatedReminder.reminderNumber,
+          message: `✅ Updated reminder ${updateDetails.join(" and ")}`,
+          details: {
+            reminder_number: updatedReminder.reminderNumber,
+            message: updatedReminder.message,
+            scheduled_time: updatedReminder.scheduledTimeLocal,
+          },
+        });
+      } else {
+        return JSON.stringify({
+          success: false,
+          error: `Reminder #${args.reminder_number} not found or already completed`,
+        });
+      }
+    } catch (error: any) {
+      logger.error("Error updating reminder:", error);
+      return JSON.stringify({
+        success: false,
+        error: "Failed to update reminder: " + error.message,
       });
     }
   }
