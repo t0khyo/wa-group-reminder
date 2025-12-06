@@ -202,13 +202,13 @@ export class TaskScheduler {
       // Task statistics
       message += `📊 *Statistics:*\n`;
       message += `• Total: ${stats.total}\n`;
-      message += `• 🟨 Pending: ${stats.pending}\n`;
-      message += `• 🟩 Done: ${stats.done}\n`;
-      message += `• 🟥 Cancelled: ${stats.cancelled}\n\n`;
+      message += `• 🟡 Pending: ${stats.pending}\n`;
+      message += `• 🟢 Done: ${stats.done}\n`;
+      message += `• 🔴 Cancelled: ${stats.cancelled}\n\n`;
 
       // List pending tasks
       if (pendingTasks.length > 0) {
-        message += `🟨 *Pending Tasks (${pendingTasks.length}):*\n\n`;
+        message += `🟡 *Pending Tasks (${pendingTasks.length}):*\n\n`;
 
         for (const task of pendingTasks) {
           message += taskService.formatTask(task, true) + "\n";

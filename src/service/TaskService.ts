@@ -287,11 +287,11 @@ export class TaskService {
   getStatusEmoji(status: TaskStatus): string {
     switch (status) {
       case TaskStatus.Pending:
-        return "🟨";
+        return "🟡";
       case TaskStatus.Done:
-        return "🟩";
+        return "🟢";
       case TaskStatus.Cancelled:
-        return "🟥";
+        return "🔴";
       default:
         return "⬜";
     }
