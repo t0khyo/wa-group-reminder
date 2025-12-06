@@ -196,7 +196,7 @@ export class ReminderScheduler {
         zone: "utc",
       })
         .setZone(reminder.timezone)
-        .toLocaleString(DateTime.DATETIME_FULL);
+        .toLocaleString(DateTime.DATETIME_MED_WITH_WEEKDAY);
 
       // Send WhatsApp message
       if (whatsappService) {
@@ -248,7 +248,7 @@ export class ReminderScheduler {
         zone: "utc",
       })
         .setZone(reminder.timezone)
-        .toLocaleString(DateTime.DATETIME_FULL);
+        .toLocaleString(DateTime.DATETIME_MED_WITH_WEEKDAY);
 
       // Send WhatsApp message
       if (whatsappService) {
@@ -300,7 +300,7 @@ export class ReminderScheduler {
         zone: "utc",
       })
         .setZone(reminder.timezone)
-        .toLocaleString(DateTime.DATETIME_FULL);
+        .toLocaleString(DateTime.DATETIME_MED_WITH_WEEKDAY);
 
       // Send WhatsApp message
       if (whatsappService) {
