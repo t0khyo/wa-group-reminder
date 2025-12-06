@@ -4,7 +4,7 @@ import * as chrono from "chrono-node";
 import { Reminder } from "../generated/prisma/client.js";
 import { DateTime } from "luxon";
 import { DEFAULT_TIMEZONE } from "../config/TimeZone.js";
-import { reminderScheduler } from "./ReminderScheduler.js";
+import { reminderScheduler } from "../sheduler/ReminderScheduler.js";
 
 /**
  * ReminderService - Handles reminder creation, listing, and cancellation using Prisma

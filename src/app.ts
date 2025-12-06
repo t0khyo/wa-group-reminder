@@ -1,7 +1,9 @@
 import WhatsappService from "./service/WhatsappService.js";
 import logger from "./utils/logger.js";
-import { reminderScheduler } from "./service/ReminderScheduler.js";
-import { setWhatsappService } from "./service/ReminderScheduler.js";
+import { reminderScheduler } from "./sheduler/ReminderScheduler.js";
+import { setWhatsappService as setReminderWhatsappService } from "./sheduler/ReminderScheduler.js";
+import { taskScheduler } from "./sheduler/TaskScheduler.js";
+import { setWhatsappService as setTaskWhatsappService } from "./sheduler/TaskScheduler.js";
 
 async function main() {
   try {
@@ -10,10 +12,14 @@ async function main() {
     // Start the reminder scheduler
     await reminderScheduler.start();
 
+    // Start the task scheduler
+    await taskScheduler.start();
+
     await whatsappService.start();
 
-    // Connect WhatsApp service to scheduler for sending messages
-    setWhatsappService(whatsappService);
+    // Connect WhatsApp service to schedulers for sending messages
+    setReminderWhatsappService(whatsappService);
+    setTaskWhatsappService(whatsappService);
 
     logger.info("🚀 WhatsApp bot started successfully!");
 
@@ -27,6 +33,7 @@ async function main() {
     process.on("SIGINT", async () => {
       logger.info("Received SIGINT, shutting down gracefully...");
       reminderScheduler.stop();
+      taskScheduler.stop();
       // await whatsappService.disconnect();
       process.exit(0);
     });
@@ -34,6 +41,7 @@ async function main() {
     process.on("SIGTERM", async () => {
       logger.info("Received SIGTERM, shutting down gracefully...");
       reminderScheduler.stop();
+      taskScheduler.stop();
       // await whatsappService.disconnect();
       process.exit(0);
     });
