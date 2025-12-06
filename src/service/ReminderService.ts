@@ -28,11 +28,12 @@ export class ReminderService {
    */
   private toReminderDto(reminder: Reminder): ReminderDto {
     const timezone = reminder.timezone || DEFAULT_TIMEZONE;
-    const scheduledTimeLocal = DateTime.fromJSDate(reminder.remindAtUtc, {
+    const dt = DateTime.fromJSDate(reminder.remindAtUtc, {
       zone: "utc",
-    })
-      .setZone(timezone)
-      .toLocaleString(DateTime.DATETIME_FULL);
+    }).setZone(timezone);
+
+    // Format: "7 Dec 2025 at 1:53 AM" (no timezone, no em dash)
+    const scheduledTimeLocal = dt.toFormat("d MMM yyyy 'at' h:mm a");
 
     return {
       id: reminder.id,

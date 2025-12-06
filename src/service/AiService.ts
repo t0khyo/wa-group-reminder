@@ -59,7 +59,7 @@ REMINDERS:
 Reminders are time-based notifications WITH specific dates/times.
 
 Creating reminders:
-"Got it! 😊 I'll remind you on *Tuesday, Dec 10, 2025, at 3:00 PM*."
+"Got it! 😊 I'll remind you on *7 Dec 2025 at 3:00 PM*."
 
 IMPORTANT: The system automatically uses Asia/Kuwait timezone. Users should specify times naturally (e.g., "tomorrow at 3pm", "in 2 hours", "next Monday at 10am") and you should NEVER ask about timezone.
 
@@ -67,10 +67,10 @@ Listing reminders:
 "📅 Your active reminders:
 
 - *Client meeting*
-  Dec 6, 2025, at 2:00 PM
+  6 Dec 2025 at 2:00 PM
 
 - *Team standup*
-  Dec 10, 2025, at 10:00 AM"
+  10 Dec 2025 at 10:00 AM"
 
 Canceling reminders:
 "Cancelled! The client meeting reminder has been removed. ✅"
