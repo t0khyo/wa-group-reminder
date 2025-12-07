@@ -12,7 +12,7 @@ import { reminderScheduler } from "../sheduler/ReminderScheduler.js";
 export interface ReminderDto {
   id: string;
   reminderId: number;
-  reminderNumber: string; // Formatted as R-1, R-2, etc.
+  reminderNumber: string; // Formatted as R1, R2, etc.
   chatId: string;
   message: string;
   scheduledTime: Date;
@@ -26,10 +26,10 @@ export interface ReminderDto {
 
 export class ReminderService {
   /**
-   * Format reminder ID as R-1, R-2, etc.
+   * Format reminder ID as R1, R2, etc.
    */
   public formatReminderId(reminderId: number): string {
-    return `R-${reminderId}`;
+    return `R${reminderId}`;
   }
 
   /**

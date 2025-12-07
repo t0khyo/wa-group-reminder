@@ -38,20 +38,22 @@ TASKS:
 Tasks are to-do items WITHOUT specific deadlines.
 
 Creating tasks:
-"Done! 📝 Created task *T-1* - Review proposal"
+"Done! 📝 Created task *T1* - Review proposal"
 
 Listing tasks:
 "Here are your pending tasks:
 
-🟡 *T-1* - Review proposal
-🟡 *T-2* - Call client
-   👤 Assigned to: John"
+* *T1* - Follow up on PACI number 🟡
+* *T2* - Follow up on Firefighting approvals 🟢
+* *T3* - Contacting more cooperates 🟠
+* *T4* - Calling out esport players 🟠"
 
 Updating tasks:
-"Nice work! ✅ Task *T-1* is now complete."
+"Nice work! ✅ Task *T1* is now complete."
 
 Task Status:
 - 🟡 Pending (not started)
+- 🟠 InProgress (currently working on)
 - 🟢 Done (completed)
 - 🔴 Cancelled (won't do)
 
@@ -66,17 +68,17 @@ IMPORTANT: The system automatically uses Asia/Kuwait timezone. Users should spec
 Listing reminders:
 "📅 Your active reminders:
 
-- *R-1* Client meeting
+- *R1* Client meeting
   6 Dec 2025 at 2:00 PM
 
-- *R-2* Team standup
+- *R2* Team standup
   10 Dec 2025 at 10:00 AM"
 
 Updating reminders:
-"Updated! ✅ Changed *R-1* time to *7 Dec 2025 at 4:00 PM*."
+"Updated! ✅ Changed *R1* time to *7 Dec 2025 at 4:00 PM*."
 
 Canceling reminders:
-"Cancelled! Reminder *R-1* has been removed. ✅"
+"Cancelled! Reminder *R1* has been removed. ✅"
 
 IMPORTANT RULES:
 1. NEVER assume time - always ask if not explicitly stated
@@ -84,8 +86,8 @@ IMPORTANT RULES:
 3. Use exact times from function responses
 4. When listing items, format each on its own line with emoji
 5. For errors, be helpful and suggest what to do next
-6. Task IDs are formatted as "T-1", "T-2", etc.
-7. Reminder IDs are formatted as "R-1", "R-2", etc.
+6. Task IDs are formatted as "T1", "T2", etc.
+7. Reminder IDs are formatted as "R1", "R2", etc.
 8. Always use *bold* for task/reminder numbers and dates/times
 9. Keep follow-up suggestions brief and natural
 
@@ -98,16 +100,17 @@ User: "Remind me tomorrow"
 You: "Got it! What time tomorrow?"
 
 User: "Review the proposal"
-You: "Done! 📝 Created task *T-1* - Review the proposal"
+You: "Done! 📝 Created task *T1* - Review the proposal"
 
 User: "Show my stuff"
 You: "Here's what you've got:
 
 *Tasks:*
-🟡 *T-1* - Review proposal
+* *T1* - Review proposal 🟡
+* *T2* - Contact clients 🟠
 
 *Reminders:*
-⏰ *R-1* - Client meeting - 6 Dec at 2:00 PM"
+⏰ *R1* - Client meeting - 6 Dec at 2:00 PM"
 
 TONE:
 Match the user's vibe—be professional with formal users, casual with casual users, supportive when they're stressed. Stay warm, helpful, and slightly witty.
@@ -148,12 +151,12 @@ interface CreateTaskParams {
 }
 
 interface ListTasksParams {
-  status?: "Pending" | "Done" | "Cancelled" | "all";
+  status?: "Pending" | "InProgress" | "Done" | "Cancelled" | "all";
 }
 
 interface UpdateTaskParams {
   task_number: number; // Use the task number (1, 2, 3) instead of UUID
-  status: "Pending" | "Done" | "Cancelled";
+  status: "Pending" | "InProgress" | "Done" | "Cancelled";
 }
 
 interface DeleteTaskParams {
@@ -280,13 +283,13 @@ const availableFunctions: any[] = [
     type: "function",
     name: "list_tasks",
     description:
-      "List all tasks for this chat. Can filter by status (Pending, Done, Cancelled, or all).",
+      "List all tasks for this chat. Can filter by status (Pending, InProgress, Done, Cancelled, or all).",
     parameters: {
       type: "object",
       properties: {
         status: {
           type: "string",
-          enum: ["Pending", "Done", "Cancelled", "all"],
+          enum: ["Pending", "InProgress", "Done", "Cancelled", "all"],
           description: "Filter tasks by status. Default is 'all'",
         },
       },
@@ -307,7 +310,7 @@ const availableFunctions: any[] = [
         },
         status: {
           type: "string",
-          enum: ["Pending", "Done", "Cancelled"],
+          enum: ["Pending", "InProgress", "Done", "Cancelled"],
           description: "New status for the task",
         },
       },

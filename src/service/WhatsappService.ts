@@ -432,7 +432,7 @@ export class WhatsappService {
   async sendMessage(
     chatId: string,
     content: any
-  ): Promise<WAMessage | undefined> {
+  ) {
     if (!this.socket) {
       throw new Error("WhatsApp socket not initialized");
     }

@@ -208,18 +208,22 @@ export class TaskService {
   async getTaskStats(chatId: string): Promise<{
     total: number;
     pending: number;
+    inProgress: number;
     done: number;
     cancelled: number;
   }> {
     try {
-      const [total, pending, done, cancelled] = await Promise.all([
+      const [total, pending, inProgress, done, cancelled] = await Promise.all([
         prisma.tasks.count({ where: { chatId } }),
         prisma.tasks.count({ where: { chatId, status: TaskStatus.Pending } }),
+        prisma.tasks.count({
+          where: { chatId, status: TaskStatus.InProgress },
+        }),
         prisma.tasks.count({ where: { chatId, status: TaskStatus.Done } }),
         prisma.tasks.count({ where: { chatId, status: TaskStatus.Cancelled } }),
       ]);
 
-      return { total, pending, done, cancelled };
+      return { total, pending, inProgress, done, cancelled };
     } catch (error) {
       logger.error(`Error getting task stats for chat ${chatId}:`, error);
       throw new Error("Failed to get task statistics");
@@ -275,10 +279,10 @@ export class TaskService {
   }
 
   /**
-   * Format task ID for display (T-1, T-2, etc.)
+   * Format task ID for display (T1, T2, etc.)
    */
   formatTaskId(taskId: number): string {
-    return `T-${taskId}`;
+    return `T${taskId}`;
   }
 
   /**
@@ -288,6 +292,8 @@ export class TaskService {
     switch (status) {
       case TaskStatus.Pending:
         return "🟡";
+      case TaskStatus.InProgress:
+        return "🟠";
       case TaskStatus.Done:
         return "🟢";
       case TaskStatus.Cancelled:

@@ -34,6 +34,7 @@ model Reminder {
 
 enum TaskStatus {
   Pending
+  InProgress
   Done
   Cancelled
 }

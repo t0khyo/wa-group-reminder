@@ -134,14 +134,17 @@ export class TaskScheduler {
   }
 
   /**
-   * Get all unique chat IDs that have pending tasks
+   * Get all unique chat IDs that have pending or in-progress tasks
    */
   private async getAllChatsWithTasks(): Promise<string[]> {
     try {
-      // Get distinct chat IDs that have at least one pending task
+      // Get distinct chat IDs that have at least one pending or in-progress task
       const result = await prisma.tasks.findMany({
         where: {
-          status: TaskStatus.Pending,
+          OR: [
+            { status: TaskStatus.Pending },
+            { status: TaskStatus.InProgress },
+          ],
         },
         select: {
           chatId: true,
@@ -171,10 +174,14 @@ export class TaskScheduler {
         chatId,
         TaskStatus.Pending
       );
+      const inProgressTasks = await taskService.listTasks(
+        chatId,
+        TaskStatus.InProgress
+      );
 
-      // Only send if there are pending tasks
-      if (pendingTasks.length === 0) {
-        logger.info(`No pending tasks for chat ${chatId}, skipping digest`);
+      // Only send if there are pending or in-progress tasks
+      if (pendingTasks.length === 0 && inProgressTasks.length === 0) {
+        logger.info(`No active tasks for chat ${chatId}, skipping digest`);
         return;
       }
 
@@ -203,15 +210,20 @@ export class TaskScheduler {
       message += `📊 *Statistics:*\n`;
       message += `• Total: ${stats.total}\n`;
       message += `• 🟡 Pending: ${stats.pending}\n`;
+      message += `• 🟠 In Progress: ${stats.inProgress}\n`;
       message += `• 🟢 Done: ${stats.done}\n`;
       message += `• 🔴 Cancelled: ${stats.cancelled}\n\n`;
 
-      // List pending tasks
-      if (pendingTasks.length > 0) {
-        message += `🟡 *Pending Tasks (${pendingTasks.length}):*\n\n`;
+      // List active tasks (pending + in-progress)
+      const activeTasks = [...pendingTasks, ...inProgressTasks];
 
-        for (const task of pendingTasks) {
-          message += taskService.formatTask(task, true) + "\n";
+      if (activeTasks.length > 0) {
+        message += `*Active Tasks (${activeTasks.length}):*\n\n`;
+
+        for (const task of activeTasks) {
+          const emoji = taskService.getStatusEmoji(task.status);
+          const taskNumber = taskService.formatTaskId(task.taskId);
+          message += `* *${taskNumber}* - ${task.title} ${emoji}\n`;
         }
 
         message += `\n`;
