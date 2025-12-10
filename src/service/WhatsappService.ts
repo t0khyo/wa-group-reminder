@@ -304,7 +304,9 @@ export class WhatsappService {
       // Generate AI response with conversation context
       const reply = await this.aiService.generateReply(
         context.text,
-        context.chatId
+        context.chatId,
+        context.senderId,
+        context.mentionedJids
       );
 
       // Send reply
@@ -429,10 +431,7 @@ export class WhatsappService {
   /**
    * Send a message to a chat
    */
-  async sendMessage(
-    chatId: string,
-    content: any
-  ) {
+  async sendMessage(chatId: string, content: any) {
     if (!this.socket) {
       throw new Error("WhatsApp socket not initialized");
     }
@@ -453,7 +452,7 @@ export class WhatsappService {
   }
 
   private cleanMessage(message: string): string {
-    const cleanedMessage =  message.replace(/\*\*/g, '*').trim();
+    const cleanedMessage = message.replace(/\*\*/g, "*").trim();
     return cleanedMessage;
   }
 

@@ -5,6 +5,7 @@ import { taskService } from "./TaskService.js";
 import dotenv from "dotenv";
 import { parseDateTime } from "../utils/DateParser.js";
 import { TaskStatus } from "../generated/prisma/client.js";
+import { cleanMessage } from "@whiskeysockets/baileys";
 dotenv.config();
 
 const AI_MODEL = process.env.AI_MODEL || "gpt-5-nano";
@@ -63,6 +64,16 @@ Reminders are time-based notifications WITH specific dates/times.
 Creating reminders:
 "Got it! 😊 I'll remind you on *7 Dec 2025 at 3:00 PM*."
 
+MENTIONS IN REMINDERS:
+When users mention people (using @) in the same message as a reminder request, automatically include those mentioned users in the reminder so they get notified when the reminder is sent. The mentions are detected automatically from WhatsApp mentions.
+
+Examples:
+User: "@John @Sarah remind us tomorrow at 3pm about the meeting"
+You: "Got it! 😊 I'll remind you and the mentioned users on *8 Dec 2025 at 3:00 PM*."
+
+User: "Remind me and @Ahmad about dentist appointment on Friday at 10am"
+You: "Set! 📅 I'll remind you and the mentioned users on *12 Dec 2025 at 10:00 AM*."
+
 IMPORTANT: The system automatically uses Asia/Kuwait timezone. Users should specify times naturally (e.g., "tomorrow at 3pm", "in 2 hours", "next Monday at 10am") and you should NEVER ask about timezone.
 
 Listing reminders:
@@ -88,6 +99,7 @@ IMPORTANT RULES:
 5. For errors, be helpful and suggest what to do next
 6. Task IDs are formatted as "T1", "T2", etc.
 7. Reminder IDs are formatted as "R1", "R2", etc.
+8. When users mention people in reminder requests, those mentions are automatically captured
 8. Always use *bold* for task/reminder numbers and dates/times
 9. Keep follow-up suggestions brief and natural
 
@@ -339,6 +351,8 @@ const availableFunctions: any[] = [
 export class AiService {
   private client: OpenAI;
   private previousResponseIds: Map<string, string> = new Map();
+  private senderIds: Map<string, string> = new Map(); // chatId -> senderId mapping
+  private mentionedJids: Map<string, string[]> = new Map(); // chatId -> mentioned JIDs
   private functionHandlers: Map<
     string,
     (args: any, chatId: string) => Promise<string>
@@ -392,12 +406,23 @@ export class AiService {
 
       const scheduledTime = parseDateTime(args.datetime);
 
+      // Get sender ID from the map, fallback to "system" if not found
+      const senderId = this.senderIds.get(chatId) || "system";
+
+      // Get mentioned JIDs from the message context
+      const contextMentions = this.mentionedJids.get(chatId) || [];
+
+      // Combine AI-provided mentions with context mentions (remove duplicates)
+      const allMentions = [
+        ...new Set([...(args.mentions || []), ...contextMentions]),
+      ];
+
       const reminder = await reminderService.createReminder(
         chatId,
         args.message,
         scheduledTime.utc,
-        args.mentions || [],
-        "system"
+        allMentions,
+        senderId
       );
 
       return JSON.stringify({
@@ -408,7 +433,6 @@ export class AiService {
           reminder_number: reminder.reminderNumber,
           message: args.message,
           scheduled_time: reminder.scheduledTimeLocal,
-          mentions: args.mentions || [],
         },
       });
     } catch (error: any) {
@@ -795,10 +819,28 @@ export class AiService {
    * Generate a reply with conversation memory and function calling support
    * @param text - User's message
    * @param userId - Unique identifier for the user/chat (e.g., chatId or userId)
+   * @param senderId - Optional sender ID to track who created the reminder
+   * @param mentionedJids - Optional array of mentioned user JIDs from the message
    * @returns AI-generated reply
    */
-  public async generateReply(text: string, userId: string): Promise<string> {
+  public async generateReply(
+    text: string,
+    userId: string,
+    senderId?: string,
+    mentionedJids?: string[]
+  ): Promise<string> {
+    text = this.cleanTextMessage(text);
     logger.info(`AI processing text from user ${userId}: "${text}"`);
+
+    // Store sender ID if provided
+    if (senderId) {
+      this.senderIds.set(userId, senderId);
+    }
+
+    // Store mentioned JIDs if provided (excluding the bot itself)
+    if (mentionedJids && mentionedJids.length > 0) {
+      this.mentionedJids.set(userId, mentionedJids);
+    }
 
     try {
       // Get previous response ID for this user (if any)
@@ -896,5 +938,32 @@ export class AiService {
   public clearAllHistories(): void {
     this.previousResponseIds.clear();
     logger.info("Cleared all conversation histories");
+  }
+
+  private cleanTextMessage(text: string): string {
+    if (!text) return "";
+
+    let cleanText = text;
+
+    // 1) Remove lines that contain only mentions
+    cleanText = cleanText.replace(/^\s*@\d{5,20}(?:@\S+)?\s*$/gm, "");
+
+    // 2) Remove inline mentions anywhere in the text
+    cleanText = cleanText.replace(/@\d{5,20}(?:@\S+)?/g, "");
+
+    // 3) Remove invisible zero-width characters
+    cleanText = cleanText.replace(/[\u200B-\u200D\uFEFF]/g, "");
+
+    // 4) Normalize multiple new lines to a single one
+    cleanText = cleanText.replace(/\n{2,}/g, "\n");
+
+    // 5) Normalize spaces per line while preserving newlines
+    cleanText = cleanText
+      .split("\n")
+      .map((line) => line.replace(/\s+/g, " ").trim())
+      .filter((line) => line.length > 0)
+      .join("\n");
+
+    return cleanText;
   }
 }

@@ -200,11 +200,26 @@ export class ReminderScheduler {
 
       // Send WhatsApp message
       if (whatsappService) {
-        const message = `⏰ *Reminder in 24 hours!*\n\n📌 ${reminder.title}\n🕐 ${localTime}`;
+        let message = `⏰ *Reminder in 24 hours!*\n\n📌 ${reminder.title}\n🕐 ${localTime}`;
+
+        // Build mentions array (include existing mentions + sender)
+        const mentions = [...reminder.mentions];
+        if (reminder.senderId && !mentions.includes(reminder.senderId)) {
+          mentions.push(reminder.senderId);
+        }
+
+        // Add all mentions at the end
+        if (mentions.length > 0) {
+          const cleanMentions = mentions
+            .map((jid) => `> @${this.cleanJidForDisplay(jid)}`)
+            .join("\n");
+          message += `\n\n${cleanMentions}`;
+        }
+
         try {
           await whatsappService.sendMessage(reminder.chatId, {
             text: message,
-            mentions: reminder.mentions,
+            mentions: mentions,
           });
           logger.info(`✅ 24h WhatsApp message sent for ${reminderId}`);
         } catch (error) {
@@ -252,11 +267,26 @@ export class ReminderScheduler {
 
       // Send WhatsApp message
       if (whatsappService) {
-        const message = `⏰ *Reminder in 1 hour!*\n\n📌 ${reminder.title}\n🕐 ${localTime}`;
+        let message = `⏰ *Reminder in 1 hour!*\n\n📌 ${reminder.title}\n🕐 ${localTime}`;
+
+        // Build mentions array (include existing mentions + sender)
+        const mentions = [...reminder.mentions];
+        if (reminder.senderId && !mentions.includes(reminder.senderId)) {
+          mentions.push(reminder.senderId);
+        }
+
+        // Add all mentions at the end
+        if (mentions.length > 0) {
+          const cleanMentions = mentions
+            .map((jid) => `> @${this.cleanJidForDisplay(jid)}`)
+            .join("\n");
+          message += `\n\n${cleanMentions}`;
+        }
+
         try {
           await whatsappService.sendMessage(reminder.chatId, {
             text: message,
-            mentions: reminder.mentions,
+            mentions: mentions,
           });
           logger.info(`✅ 1h WhatsApp message sent for ${reminderId}`);
         } catch (error) {
@@ -304,11 +334,26 @@ export class ReminderScheduler {
 
       // Send WhatsApp message
       if (whatsappService) {
-        const message = `🔔 *REMINDER NOW!*\n\n📌 ${reminder.title}\n🕐 ${localTime}`;
+        let message = `🔔 *REMINDER NOW!*\n\n📌 ${reminder.title}\n🕐 ${localTime}`;
+
+        // Build mentions array (include existing mentions + sender)
+        const mentions = [...reminder.mentions];
+        if (reminder.senderId && !mentions.includes(reminder.senderId)) {
+          mentions.push(reminder.senderId);
+        }
+
+        // Add all mentions at the end
+        if (mentions.length > 0) {
+          const cleanMentions = mentions
+            .map((jid) => `> @${this.cleanJidForDisplay(jid)}`)
+            .join("\n");
+          message += `\n\n${cleanMentions}`;
+        }
+
         try {
           await whatsappService.sendMessage(reminder.chatId, {
             text: message,
-            mentions: reminder.mentions,
+            mentions: mentions,
           });
           logger.info(`✅ Final WhatsApp message sent for ${reminderId}`);
         } catch (error) {
@@ -535,6 +580,16 @@ export class ReminderScheduler {
       reminder24hSent,
       reminder1hSent
     );
+  }
+
+  /**
+   * Clean JID for display by removing @lid or @s.whatsapp.net suffix
+   * Examples:
+   * - "100897539518569@lid" → "100897539518569"
+   * - "96569072509@s.whatsapp.net" → "96569072509"
+   */
+  private cleanJidForDisplay(jid: string): string {
+    return jid.replace(/@lid$/, "").replace(/@s\.whatsapp\.net$/, "");
   }
 }
 
