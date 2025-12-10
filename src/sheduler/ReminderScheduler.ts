@@ -191,12 +191,12 @@ export class ReminderScheduler {
 
       logger.info(`Sending 24h advance reminder for ${reminderId}`);
 
-      // Get local time string
+      // Get local time string in format: "10th Dec, Wed, 10:52 PM"
       const localTime = DateTime.fromJSDate(reminder.remindAtUtc, {
         zone: "utc",
       })
         .setZone(reminder.timezone)
-        .toLocaleString(DateTime.DATETIME_MED_WITH_WEEKDAY);
+        .toFormat("do MMM, EEE, h:mm a");
 
       // Send WhatsApp message
       if (whatsappService) {
@@ -259,11 +259,12 @@ export class ReminderScheduler {
 
       logger.info(`Sending 1h advance reminder for ${reminderId}`);
 
+      // Get local time string in format: "10th Dec, Wed, 10:52 PM"
       const localTime = DateTime.fromJSDate(reminder.remindAtUtc, {
         zone: "utc",
       })
         .setZone(reminder.timezone)
-        .toLocaleString(DateTime.DATETIME_MED_WITH_WEEKDAY);
+        .toFormat("do MMM, EEE, h:mm a");
 
       // Send WhatsApp message
       if (whatsappService) {
@@ -326,11 +327,12 @@ export class ReminderScheduler {
 
       logger.info(`Sending final reminder for ${reminderId}`);
 
+      // Get local time string in format: "10th Dec, Wed, 10:52 PM"
       const localTime = DateTime.fromJSDate(reminder.remindAtUtc, {
         zone: "utc",
       })
         .setZone(reminder.timezone)
-        .toLocaleString(DateTime.DATETIME_MED_WITH_WEEKDAY);
+        .toFormat("do MMM, EEE, h:mm a");
 
       // Send WhatsApp message
       if (whatsappService) {
