@@ -191,16 +191,23 @@ export class ReminderScheduler {
 
       logger.info(`Sending 24h advance reminder for ${reminderId}`);
 
-      // Get local time string in format: "10th Dec, Wed, 10:52 PM"
-      const localTime = DateTime.fromJSDate(reminder.remindAtUtc, {
+      // Get local time components
+      const dt = DateTime.fromJSDate(reminder.remindAtUtc, {
         zone: "utc",
-      })
-        .setZone(reminder.timezone)
-        .toFormat("d'th' MMM, EEE, h:mm a");
+      }).setZone(reminder.timezone);
+
+      const date = dt.toFormat("d MMMM yyyy");
+      const day = dt.toFormat("EEEE");
+      const time = dt.toFormat("h:mm a");
 
       // Send WhatsApp message
       if (whatsappService) {
-        let message = `⏰ *Reminder in 24 hours!*\n\n📌 ${reminder.title}\n🕐 ${localTime}`;
+        let message = `⏰ *Reminder in 24 hours!*\n\n`;
+        message += `*Meeting Schedule*\n\n`;
+        message += `Date: ${date}\n`;
+        message += `Day: ${day}\n`;
+        message += `Time: ${time}\n`;
+        message += `Meeting: ${reminder.title}`;
 
         // Build mentions array (include existing mentions + sender)
         const mentions = [...reminder.mentions];
@@ -259,16 +266,23 @@ export class ReminderScheduler {
 
       logger.info(`Sending 1h advance reminder for ${reminderId}`);
 
-      // Get local time string in format: "10th Dec, Wed, 10:52 PM"
-      const localTime = DateTime.fromJSDate(reminder.remindAtUtc, {
+      // Get local time components
+      const dt = DateTime.fromJSDate(reminder.remindAtUtc, {
         zone: "utc",
-      })
-        .setZone(reminder.timezone)
-        .toFormat("d'th' MMM, EEE, h:mm a");
+      }).setZone(reminder.timezone);
+
+      const date = dt.toFormat("d MMMM yyyy");
+      const day = dt.toFormat("EEEE");
+      const time = dt.toFormat("h:mm a");
 
       // Send WhatsApp message
       if (whatsappService) {
-        let message = `⏰ *Reminder in 1 hour!*\n\n📌 ${reminder.title}\n🕐 ${localTime}`;
+        let message = `⏰ *Reminder in 1 hour!*\n\n`;
+        message += `*Meeting Schedule*\n\n`;
+        message += `Date: ${date}\n`;
+        message += `Day: ${day}\n`;
+        message += `Time: ${time}\n`;
+        message += `Meeting: ${reminder.title}`;
 
         // Build mentions array (include existing mentions + sender)
         const mentions = [...reminder.mentions];
@@ -327,16 +341,23 @@ export class ReminderScheduler {
 
       logger.info(`Sending final reminder for ${reminderId}`);
 
-      // Get local time string in format: "10th Dec, Wed, 10:52 PM"
-      const localTime = DateTime.fromJSDate(reminder.remindAtUtc, {
+      // Get local time components
+      const dt = DateTime.fromJSDate(reminder.remindAtUtc, {
         zone: "utc",
-      })
-        .setZone(reminder.timezone)
-        .toFormat("d'th' MMM, EEE, h:mm a");
+      }).setZone(reminder.timezone);
+
+      const date = dt.toFormat("d MMMM yyyy");
+      const day = dt.toFormat("EEEE");
+      const time = dt.toFormat("h:mm a");
 
       // Send WhatsApp message
       if (whatsappService) {
-        let message = `🔔 *REMINDER NOW!*\n\n📌 ${reminder.title}\n🕐 ${localTime}`;
+        let message = `🔔 *REMINDER NOW!*\n\n`;
+        message += `*Meeting Schedule*\n\n`;
+        message += `Date: ${date}\n`;
+        message += `Day: ${day}\n`;
+        message += `Time: ${time}\n`;
+        message += `Meeting: ${reminder.title}`;
 
         // Build mentions array (include existing mentions + sender)
         const mentions = [...reminder.mentions];
