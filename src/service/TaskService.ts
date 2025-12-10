@@ -5,7 +5,6 @@ import { TaskStatus } from "../generated/prisma/client.js";
 /**
  * TaskService - Handles task creation, listing, updating, and management
  */
-
 export interface TaskDto {
   id: string;
   taskId: number;

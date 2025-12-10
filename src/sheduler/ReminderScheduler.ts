@@ -557,10 +557,13 @@ export class ReminderScheduler {
 
     try {
       const today = DateTime.now().setZone("Asia/Kuwait");
-      const formattedDate = today.toFormat("EEEE, MMMM d, yyyy");
+      const formattedDate = today.toFormat("EEEE, d'th' MMM");
 
       let message = `📅 *Good morning!*\n\n`;
       message += `Here are your reminders for *${formattedDate}*:\n\n`;
+
+      // Collect all mentions from all reminders
+      const allMentions: string[] = [];
 
       for (const reminder of reminders) {
         const localTime = DateTime.fromJSDate(reminder.remindAtUtc, {
@@ -570,13 +573,40 @@ export class ReminderScheduler {
           .toFormat("h:mm a");
 
         message += `- *${reminder.title}*\n`;
-        message += `    ${localTime}\n\n`;
+        message += `   ${localTime}\n`;
+
+        // Collect and display mentions for this specific reminder
+        const reminderMentions: string[] = [...reminder.mentions];
+        if (
+          reminder.senderId &&
+          !reminderMentions.includes(reminder.senderId)
+        ) {
+          reminderMentions.push(reminder.senderId);
+        }
+
+        // Add to all mentions for WhatsApp API
+        for (const mention of reminderMentions) {
+          if (!allMentions.includes(mention)) {
+            allMentions.push(mention);
+          }
+        }
+
+        // Display mentions under this reminder
+        if (reminderMentions.length > 0) {
+          for (const mention of reminderMentions) {
+            const cleanMention = this.cleanJidForDisplay(mention);
+            message += `   @${cleanMention}\n`;
+          }
+        }
+
+        message += `\n`;
       }
 
       message += `_You'll receive a notification 1h before each reminder._`;
 
       await whatsappService.sendMessage(chatId, {
         text: message,
+        mentions: allMentions,
       });
 
       logger.info(
