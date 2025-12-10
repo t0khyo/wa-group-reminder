@@ -77,6 +77,10 @@ export class WhatsappService {
         browser: Browsers.macOS("Safari"),
         connectTimeoutMs: 60000,
         syncFullHistory: false,
+        shouldIgnoreJid: (jid) => false,
+        getMessage: async (key) => {
+          return { conversation: "" };
+        },
       });
 
       this.setupEventHandlers(saveCreds);
@@ -255,6 +259,17 @@ export class WhatsappService {
 
     if (msg.key.fromMe) {
       logger.debug("Received own message, skipping.");
+      return;
+    }
+
+    // Skip old messages (messages sent before bot started)
+    // Only process messages from the last 2 minutes
+    const messageTimestamp = msg.messageTimestamp as number;
+    const currentTime = Math.floor(Date.now() / 1000);
+    const messageAge = currentTime - messageTimestamp;
+
+    if (messageAge > 120) {
+      logger.debug(`Skipping old message (${messageAge}s old) during sync.`);
       return;
     }
 

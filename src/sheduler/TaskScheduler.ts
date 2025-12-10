@@ -214,19 +214,61 @@ export class TaskScheduler {
       message += `• 🟢 Done: ${stats.done}\n`;
       message += `• 🔴 Cancelled: ${stats.cancelled}\n\n`;
 
-      // List active tasks (pending + in-progress)
+      // Group active tasks by assignee
       const activeTasks = [...pendingTasks, ...inProgressTasks];
+      const allMentions: string[] = [];
 
       if (activeTasks.length > 0) {
         message += `*Active Tasks (${activeTasks.length}):*\n\n`;
 
+        // Group tasks by assignee
+        const tasksByAssignee = new Map<string, typeof activeTasks>();
+        const unassignedTasks: typeof activeTasks = [];
+
         for (const task of activeTasks) {
-          const emoji = taskService.getStatusEmoji(task.status);
-          const taskNumber = taskService.formatTaskId(task.taskId);
-          message += `* *${taskNumber}* - ${task.title} ${emoji}\n`;
+          if (task.assignedTo && task.assignedTo.length > 0) {
+            // Task has assignees - add to each assignee's list
+            for (const assignee of task.assignedTo) {
+              const assigneeTasks = tasksByAssignee.get(assignee) || [];
+              assigneeTasks.push(task);
+              tasksByAssignee.set(assignee, assigneeTasks);
+
+              // Track for mentions array
+              if (!allMentions.includes(assignee)) {
+                allMentions.push(assignee);
+              }
+            }
+          } else {
+            // Unassigned task
+            unassignedTasks.push(task);
+          }
         }
 
-        message += `\n`;
+        // Display tasks grouped by assignee
+        for (const [assignee, assigneeTasks] of tasksByAssignee.entries()) {
+          // Clean JID for display
+          const cleanAssignee = this.cleanJidForDisplay(assignee);
+          message += `> @${cleanAssignee}\n`;
+
+          for (const task of assigneeTasks) {
+            const emoji = taskService.getStatusEmoji(task.status);
+            const taskNumber = taskService.formatTaskId(task.taskId);
+            message += `* *${taskNumber}* - ${task.title} ${emoji}\n`;
+          }
+
+          message += `\n`;
+        }
+
+        // Display unassigned tasks if any
+        if (unassignedTasks.length > 0) {
+          message += `*Unassigned Tasks:*\n`;
+          for (const task of unassignedTasks) {
+            const emoji = taskService.getStatusEmoji(task.status);
+            const taskNumber = taskService.formatTaskId(task.taskId);
+            message += `* *${taskNumber}* - ${task.title} ${emoji}\n`;
+          }
+          message += `\n`;
+        }
       }
 
       // Add motivational message based on period
@@ -236,8 +278,11 @@ export class TaskScheduler {
         message += `✨ Great work today! Don't forget to wrap up pending tasks.`;
       }
 
-      // Send message (WhatsappService expects { text: string } format)
-      await whatsappService.sendMessage(chatId, { text: message });
+      // Send message with mentions
+      await whatsappService.sendMessage(chatId, {
+        text: message,
+        mentions: allMentions,
+      });
       logger.info(`Sent ${period} task digest to chat ${chatId}`);
     } catch (error) {
       logger.error(
@@ -245,6 +290,13 @@ export class TaskScheduler {
         error
       );
     }
+  }
+
+  /**
+   * Clean JID for display by removing @lid or @s.whatsapp.net suffix
+   */
+  private cleanJidForDisplay(jid: string): string {
+    return jid.replace(/@lid$/, "").replace(/@s\.whatsapp\.net$/, "");
   }
 
   /**
