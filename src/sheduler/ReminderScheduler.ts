@@ -207,7 +207,7 @@ export class ReminderScheduler {
         message += `Date: ${date}\n`;
         message += `Day: ${day}\n`;
         message += `Time: ${time}\n`;
-        message += `Meeting: ${reminder.title}`;
+        message += `Title: ${reminder.title}`;
 
         // Build mentions array (include existing mentions + sender)
         const mentions = [...reminder.mentions];
@@ -282,7 +282,7 @@ export class ReminderScheduler {
         message += `Date: ${date}\n`;
         message += `Day: ${day}\n`;
         message += `Time: ${time}\n`;
-        message += `Meeting: ${reminder.title}`;
+        message += `Title: ${reminder.title}`;
 
         // Build mentions array (include existing mentions + sender)
         const mentions = [...reminder.mentions];
@@ -357,7 +357,7 @@ export class ReminderScheduler {
         message += `Date: ${date}\n`;
         message += `Day: ${day}\n`;
         message += `Time: ${time}\n`;
-        message += `Meeting: ${reminder.title}`;
+        message += `Title: ${reminder.title}`;
 
         // Build mentions array (include existing mentions + sender)
         const mentions = [...reminder.mentions];
