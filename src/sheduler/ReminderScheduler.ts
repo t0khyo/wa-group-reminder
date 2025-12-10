@@ -196,7 +196,7 @@ export class ReminderScheduler {
         zone: "utc",
       })
         .setZone(reminder.timezone)
-        .toFormat("do MMM, EEE, h:mm a");
+        .toFormat("d'th' MMM, EEE, h:mm a");
 
       // Send WhatsApp message
       if (whatsappService) {
@@ -264,7 +264,7 @@ export class ReminderScheduler {
         zone: "utc",
       })
         .setZone(reminder.timezone)
-        .toFormat("do MMM, EEE, h:mm a");
+        .toFormat("d'th' MMM, EEE, h:mm a");
 
       // Send WhatsApp message
       if (whatsappService) {
@@ -332,7 +332,7 @@ export class ReminderScheduler {
         zone: "utc",
       })
         .setZone(reminder.timezone)
-        .toFormat("do MMM, EEE, h:mm a");
+        .toFormat("d'th' MMM, EEE, h:mm a");
 
       // Send WhatsApp message
       if (whatsappService) {
