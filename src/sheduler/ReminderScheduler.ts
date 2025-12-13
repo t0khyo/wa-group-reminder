@@ -98,7 +98,8 @@ export class ReminderScheduler {
           reminder.id,
           reminder.remindAtUtc,
           reminder.reminder24hSent,
-          reminder.reminder1hSent
+          reminder.reminder1hSent,
+          reminder.reminder30mSent
         );
       }
     } catch (error) {
@@ -113,7 +114,8 @@ export class ReminderScheduler {
     reminderId: string,
     remindAtUtc: Date,
     reminder24hSent: boolean,
-    reminder1hSent: boolean
+    reminder1hSent: boolean,
+    reminder30mSent: boolean
   ): void {
     const jobs: schedule.Job[] = [];
     const now = new Date();
@@ -144,6 +146,22 @@ export class ReminderScheduler {
         jobs.push(job);
         logger.info(
           `Scheduled 1h reminder for ${reminderId} at ${oneHourBefore.toISOString()}`
+        );
+      }
+    }
+
+    // Schedule 30-minute advance reminder
+    if (!reminder30mSent) {
+      const thirtyMinutesBefore = new Date(
+        remindAtUtc.getTime() - 30 * 60 * 1000
+      );
+      if (thirtyMinutesBefore > now) {
+        const job = schedule.scheduleJob(thirtyMinutesBefore, async () => {
+          await this.send30MinuteReminder(reminderId);
+        });
+        jobs.push(job);
+        logger.info(
+          `Scheduled 30m reminder for ${reminderId} at ${thirtyMinutesBefore.toISOString()}`
         );
       }
     }
@@ -327,6 +345,81 @@ export class ReminderScheduler {
   }
 
   /**
+   * Send 30-minute advance reminder
+   */
+  private async send30MinuteReminder(reminderId: string): Promise<void> {
+    try {
+      const reminder = await prisma.reminder.findUnique({
+        where: { id: reminderId },
+      });
+
+      if (!reminder || reminder.reminderSent) {
+        return;
+      }
+
+      logger.info(`Sending 30m advance reminder for ${reminderId}`);
+
+      // Get local time components
+      const dt = DateTime.fromJSDate(reminder.remindAtUtc, {
+        zone: "utc",
+      }).setZone(reminder.timezone);
+
+      const date = dt.toFormat("d MMMM yyyy");
+      const day = dt.toFormat("EEEE");
+      const time = dt.toFormat("h:mm a");
+
+      // Send WhatsApp message
+      if (whatsappService) {
+        let message = `⏰ *Reminder in 30 minutes!*\n\n`;
+        message += `*Meeting Schedule*\n\n`;
+        message += `Date: ${date}\n`;
+        message += `Day: ${day}\n`;
+        message += `Time: ${time}\n`;
+        message += `Title: ${reminder.title}`;
+
+        // Build mentions array (include existing mentions + sender)
+        const mentions = [...reminder.mentions];
+        if (reminder.senderId && !mentions.includes(reminder.senderId)) {
+          mentions.push(reminder.senderId);
+        }
+
+        // Add all mentions at the end
+        if (mentions.length > 0) {
+          const cleanMentions = mentions
+            .map((jid) => `> @${this.cleanJidForDisplay(jid)}`)
+            .join("\n");
+          message += `\n\n${cleanMentions}`;
+        }
+
+        try {
+          await whatsappService.sendMessage(reminder.chatId, {
+            text: message,
+            mentions: mentions,
+          });
+          logger.info(`✅ 30m WhatsApp message sent for ${reminderId}`);
+        } catch (error) {
+          logger.error(
+            `Failed to send 30m WhatsApp message for ${reminderId}:`,
+            error
+          );
+        }
+      } else {
+        logger.warn("WhatsApp service not available for sending 30m reminder");
+      }
+
+      // Mark as sent
+      await prisma.reminder.update({
+        where: { id: reminderId },
+        data: { reminder30mSent: true },
+      });
+
+      logger.info(`✅ 30m reminder sent for ${reminderId}`);
+    } catch (error) {
+      logger.error(`Error sending 30m reminder for ${reminderId}:`, error);
+    }
+  }
+
+  /**
    * Send final reminder at exact time
    */
   private async sendFinalReminder(reminderId: string): Promise<void> {
@@ -452,6 +545,27 @@ export class ReminderScheduler {
         );
         if (oneHourBefore <= now) {
           await this.send1HourReminder(reminder.id);
+        }
+      }
+
+      // Check for missed 30m reminders
+      const missed30m = await prisma.reminder.findMany({
+        where: {
+          reminderSent: false,
+          reminder30mSent: false,
+          remindAtUtc: {
+            gte: now,
+            lte: new Date(now.getTime() + 30 * 60 * 1000 + 5 * 60 * 1000), // Within next 30m + 5min buffer
+          },
+        },
+      });
+
+      for (const reminder of missed30m) {
+        const thirtyMinutesBefore = new Date(
+          reminder.remindAtUtc.getTime() - 30 * 60 * 1000
+        );
+        if (thirtyMinutesBefore <= now) {
+          await this.send30MinuteReminder(reminder.id);
         }
       }
 
@@ -602,7 +716,7 @@ export class ReminderScheduler {
         message += `\n`;
       }
 
-      message += `_You'll receive a notification 1h before each reminder._`;
+      message += `_You'll receive notifications 1h and 30m before each reminder._`;
 
       await whatsappService.sendMessage(chatId, {
         text: message,
@@ -624,14 +738,16 @@ export class ReminderScheduler {
     reminderId: string,
     remindAtUtc: Date,
     reminder24hSent: boolean = false,
-    reminder1hSent: boolean = false
+    reminder1hSent: boolean = false,
+    reminder30mSent: boolean = false
   ): Promise<void> {
     logger.info(`Adding reminder ${reminderId} to scheduler`);
     this.scheduleReminder(
       reminderId,
       remindAtUtc,
       reminder24hSent,
-      reminder1hSent
+      reminder1hSent,
+      reminder30mSent
     );
   }
 

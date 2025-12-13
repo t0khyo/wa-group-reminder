@@ -13,6 +13,8 @@ import qrcode from "qrcode-terminal";
 import logger from "../utils/logger.js";
 import { AiService } from "./AiService.js";
 import { RateLimiter } from "../utils/RateLimiter.js";
+import { taskService } from "./TaskService.js";
+import { TaskStatus } from "../generated/prisma/client.js";
 import fs from "fs";
 
 // Type definitions
@@ -179,6 +181,12 @@ export class WhatsappService {
       // Update bot identity from user info
       if (this.socket?.user?.id) {
         this.botIdentity.jid = this.socket.user.id;
+
+        // Extract phone number from JID if available
+        const match = this.socket.user.id.match(/^(\d+)@/);
+        if (match && !this.botIdentity.phoneNumber) {
+          this.botIdentity.phoneNumber = match[1];
+        }
       }
 
       logger.info("✅ Connected to WhatsApp successfully!");
@@ -295,6 +303,14 @@ export class WhatsappService {
       return;
     }
 
+    // Handle test commands (dev mode)
+    if (context.text.startsWith("/")) {
+      const handled = await this.handleCommand(context);
+      if (handled) {
+        return;
+      }
+    }
+
     // Check if bot is mentioned or replied to
     const isMentioned = this.isBotMentioned(msg);
 
@@ -342,6 +358,297 @@ export class WhatsappService {
   }
 
   /**
+   * Handle slash commands for testing and development
+   */
+  private async handleCommand(context: MessageContext): Promise<boolean> {
+    const command = context.text.split(" ")[0].toLowerCase();
+
+    try {
+      switch (command) {
+        case "/help":
+          await this.handleHelpCommand(context);
+          return true;
+
+        case "/tasks":
+          await this.handleMyTasksCommand(context);
+          return true;
+
+        case "/all-tasks":
+          await this.handleAllTasksCommand(context);
+          return true;
+
+        case "/recent-tasks":
+          await this.handleRecentTasksCommand(context);
+          return true;
+
+        case "/task-digest":
+          await this.handleTaskDigestCommand(context);
+          return true;
+
+        default:
+          return false;
+      }
+    } catch (error) {
+      logger.error(`Error handling command ${command}:`, error);
+      await this.sendMessage(context.chatId, {
+        text: "Sorry, an error occurred while processing the command.",
+      });
+      return true;
+    }
+  }
+
+  /**
+   * Handle /help command - show available commands
+   */
+  private async handleHelpCommand(context: MessageContext): Promise<void> {
+    const message = `*GiGi Commands*
+
+📝 *Commands:*
+• \`/tasks\` - Your active tasks
+• \`/all-tasks\` - All group tasks
+• \`/recent-tasks\` - Recently closed
+• \`/task-digest\` - Manual digest
+• \`/ping\` - Test bot
+
+💬 *Chat naturally by mentioning me to:*
+• Create tasks & reminders
+• Update task status
+• List & manage tasks
+
+📌 Mention users to assign tasks or say "assign me"`;
+
+    await this.sendMessage(context.chatId, {
+      text: message,
+    });
+  }
+
+  /**
+   * Handle /all-tasks command - show all active tasks in the chat
+   */
+  private async handleAllTasksCommand(context: MessageContext): Promise<void> {
+    const stats = await taskService.getTaskStats(context.chatId);
+    const pendingTasks = await taskService.listTasks(
+      context.chatId,
+      TaskStatus.Pending
+    );
+    const inProgressTasks = await taskService.listTasks(
+      context.chatId,
+      TaskStatus.InProgress
+    );
+
+    const activeTasks = [...pendingTasks, ...inProgressTasks];
+
+    let message = `📋 *All Active Tasks*\n\n`;
+    message += `📊 *Statistics:*\n`;
+    message += `• Total: ${stats.total}\n`;
+    message += `🟡 Pending: ${stats.pending}\n`;
+    message += `🟠 In Progress: ${stats.inProgress}\n`;
+    message += `🟢 Done: ${stats.done}\n`;
+    message += `🔴 Cancelled: ${stats.cancelled}\n\n`;
+
+    if (activeTasks.length === 0) {
+      message += `No active tasks! 🎉`;
+    } else {
+      message += `*Active Tasks (${activeTasks.length}):*\n\n`;
+
+      // Group by assignee
+      const tasksByAssignee = new Map<string, typeof activeTasks>();
+      const unassignedTasks: typeof activeTasks = [];
+
+      for (const task of activeTasks) {
+        if (task.assignedTo && task.assignedTo.length > 0) {
+          for (const assignee of task.assignedTo) {
+            const assigneeTasks = tasksByAssignee.get(assignee) || [];
+            assigneeTasks.push(task);
+            tasksByAssignee.set(assignee, assigneeTasks);
+          }
+        } else {
+          unassignedTasks.push(task);
+        }
+      }
+
+      // Display tasks by assignee
+      for (const [assignee, tasks] of tasksByAssignee.entries()) {
+        const cleanAssignee = this.cleanJidForDisplay(assignee);
+        message += `> @${cleanAssignee}\n`;
+        for (const task of tasks) {
+          const emoji = taskService.getStatusEmoji(task.status);
+          const taskNumber = taskService.formatTaskId(task.taskId);
+          message += `* *${taskNumber}* - ${task.title} ${emoji}\n`;
+        }
+        message += `\n`;
+      }
+
+      // Unassigned tasks
+      if (unassignedTasks.length > 0) {
+        message += `*Unassigned:*\n`;
+        for (const task of unassignedTasks) {
+          const emoji = taskService.getStatusEmoji(task.status);
+          const taskNumber = taskService.formatTaskId(task.taskId);
+          message += `* *${taskNumber}* - ${task.title} ${emoji}\n`;
+        }
+      }
+    }
+
+    // Collect mentions
+    const mentions: string[] = [];
+    for (const task of activeTasks) {
+      if (task.assignedTo) {
+        for (const assignee of task.assignedTo) {
+          if (!mentions.includes(assignee)) {
+            mentions.push(assignee);
+          }
+        }
+      }
+    }
+
+    await this.sendMessage(context.chatId, { text: message, mentions });
+  }
+
+  /**
+   * Handle /tasks command - show tasks assigned to the sender
+   */
+  private async handleMyTasksCommand(context: MessageContext): Promise<void> {
+    logger.info(
+      `Fetching tasks for sender: ${context.senderId} in chat: ${context.chatId}`
+    );
+
+    const myTasks = await taskService.getTasksAssignedTo(
+      context.chatId,
+      context.senderId
+    );
+
+    logger.info(
+      `Found ${myTasks.length} total tasks assigned to ${context.senderId}`
+    );
+    logger.info(
+      `Tasks: ${JSON.stringify(
+        myTasks.map((t) => ({
+          id: t.taskId,
+          title: t.title,
+          status: t.status,
+          assignedTo: t.assignedTo,
+        }))
+      )}`
+    );
+
+    const activeTasks = myTasks.filter(
+      (t) =>
+        t.status === TaskStatus.Pending || t.status === TaskStatus.InProgress
+    );
+
+    logger.info(
+      `Filtered to ${activeTasks.length} active tasks (Pending or InProgress)`
+    );
+
+    const cleanSender = this.cleanJidForDisplay(context.senderId);
+    let message = `> @${cleanSender}\n\n`;
+
+    if (activeTasks.length === 0) {
+      message += `You have no active tasks! 🎉`;
+    } else {
+      message += `You have *${activeTasks.length}* active task(s):\n\n`;
+
+      for (const task of activeTasks) {
+        const emoji = taskService.getStatusEmoji(task.status);
+        const taskNumber = taskService.formatTaskId(task.taskId);
+        message += `* *${taskNumber}* - ${task.title} ${emoji}\n`;
+      }
+    }
+
+    await this.sendMessage(context.chatId, {
+      text: message,
+      mentions: [context.senderId],
+    });
+  }
+
+  /**
+   * Handle /recent-tasks command - show recently completed or cancelled tasks
+   */
+  private async handleRecentTasksCommand(
+    context: MessageContext
+  ): Promise<void> {
+    const recentTasks = await taskService.getRecentClosedTasks(context.chatId);
+
+    if (recentTasks.length === 0) {
+      await this.sendMessage(context.chatId, {
+        text: "📋 No tasks completed or cancelled in the last 7 days.",
+      });
+      return;
+    }
+
+    let message = `📋 *Recently Closed Tasks* (Last 7 days)\n\n`;
+
+    const completed = recentTasks.filter((t) => t.status === TaskStatus.Done);
+    const cancelled = recentTasks.filter(
+      (t) => t.status === TaskStatus.Cancelled
+    );
+
+    if (completed.length > 0) {
+      message += `✅ *Completed (${completed.length}):*\n`;
+      for (const task of completed) {
+        const taskNumber = taskService.formatTaskId(task.taskId);
+        const assignee =
+          task.assignedTo.length > 0
+            ? `@${this.cleanJidForDisplay(task.assignedTo[0])}`
+            : "unassigned";
+        message += `* *${taskNumber}* - ${task.title} (${assignee})\n`;
+      }
+      message += "\n";
+    }
+
+    if (cancelled.length > 0) {
+      message += `❌ *Cancelled (${cancelled.length}):*\n`;
+      for (const task of cancelled) {
+        const taskNumber = taskService.formatTaskId(task.taskId);
+        const assignee =
+          task.assignedTo.length > 0
+            ? `@${this.cleanJidForDisplay(task.assignedTo[0])}`
+            : "unassigned";
+        message += `* *${taskNumber}* - ${task.title} (${assignee})\n`;
+      }
+    }
+
+    // Extract mentions from tasks
+    const mentions = recentTasks
+      .filter((t) => t.assignedTo.length > 0)
+      .map((t) => t.assignedTo[0])
+      .filter((jid, index, self) => self.indexOf(jid) === index); // unique
+
+    await this.sendMessage(context.chatId, {
+      text: message,
+      mentions: mentions.length > 0 ? mentions : undefined,
+    });
+  }
+
+  /**
+   * Handle /task-digest command - trigger task digest manually
+   */
+  private async handleTaskDigestCommand(
+    context: MessageContext
+  ): Promise<void> {
+    // Import TaskScheduler dynamically to avoid circular dependency
+    const { taskScheduler } = await import("../sheduler/TaskScheduler.js");
+
+    await this.sendMessage(context.chatId, {
+      text: "📊 Generating task digest...",
+    });
+
+    await taskScheduler.sendManualDigest(context.chatId, "morning");
+
+    logger.info(
+      `Manual task digest sent to ${context.chatId} by ${context.senderId}`
+    );
+  }
+
+  /**
+   * Clean JID for display by removing @lid or @s.whatsapp.net suffix
+   */
+  private cleanJidForDisplay(jid: string): string {
+    return jid.replace(/@lid$/, "").replace(/@s\.whatsapp\.net$/, "");
+  }
+
+  /**
    * Extract message context and metadata
    */
   private extractMessageContext(msg: WAMessage): MessageContext {
@@ -357,14 +664,20 @@ export class WhatsappService {
     const quotedMessage =
       msg.message?.extendedTextMessage?.contextInfo?.quotedMessage || undefined;
 
-    // Extract mentioned JIDs
-    const mentionedJids =
+    // Extract mentioned JIDs and filter out the bot's own JID/LID
+    const allMentionedJids =
       msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+
+    const mentionedJids = allMentionedJids.filter(
+      (jid) => jid !== this.botIdentity.jid && jid !== this.botIdentity.lid
+    );
 
     logger.info(
       `Extracted message context: chatId=${chatId}, senderId=${senderId}, isGroup=${isGroup}, quotedMessage=${
         quotedMessage ? JSON.stringify(quotedMessage) : "undefined"
-      } text="${text}", mentionedJids=[${mentionedJids.join(", ")}]`
+      } text="${text}", mentionedJids=[${mentionedJids.join(
+        ", "
+      )}] (bot mentions filtered out)`
     );
 
     return {

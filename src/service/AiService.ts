@@ -37,9 +37,22 @@ Actions: 🗑️ (delete), ✏️ (edit),  📝 (list)
 
 TASKS:
 Tasks are to-do items WITHOUT specific deadlines.
+Tasks can be assigned to ONLY ONE person.
 
-Creating tasks:
-"Done! 📝 Created task *T1* - Review proposal"
+Creating tasks - Assignment Rules:
+1. If user says "assign to me", "my task", or "for me" → assign to the sender (set assign_to_sender: true)
+2. If user mentions someone (e.g., "@John review proposal") → assign to first mentioned person (set use_first_mention: true)
+3. If no mention or assignment specified → create unassigned task
+
+Examples:
+User: "Create task review proposal"
+You: "Done! 📝 Created task *T1* - Review proposal"
+
+User: "Assign to me: follow up with client"
+You: "Done! 📝 Created task *T1* - Follow up with client (assigned to you)"
+
+User: "@John finish the presentation"
+You: "Done! 📝 Created task *T1* - Finish the presentation (assigned to @John)"
 
 Listing tasks:
 "Here are your pending tasks:
@@ -65,7 +78,7 @@ Creating reminders:
 "Got it! 😊 I'll remind you on *7 Dec 2025 at 3:00 PM*."
 
 MENTIONS IN REMINDERS:
-When users mention people (using @) in the same message as a reminder request, automatically include those mentioned users in the reminder so they get notified when the reminder is sent. The mentions are detected automatically from WhatsApp mentions.
+When users mention people (using @) in the same message as a reminder request, those mentioned users are AUTOMATICALLY included in the reminder notifications. You don't need to do anything - the system captures mentions from the WhatsApp message context.
 
 Examples:
 User: "@John @Sarah remind us tomorrow at 3pm about the meeting"
@@ -140,7 +153,6 @@ interface Message {
 interface ReminderParams {
   message: string;
   datetime: string;
-  mentions?: string[];
 }
 
 interface ListRemindersParams {
@@ -159,7 +171,8 @@ interface UpdateReminderParams {
 
 interface CreateTaskParams {
   title: string;
-  assigned_to?: string[];
+  assign_to_sender?: boolean;
+  use_first_mention?: boolean;
 }
 
 interface ListTasksParams {
@@ -182,7 +195,7 @@ const availableFunctions: any[] = [
     name: "create_reminder",
     description:
       "Create a reminder that will be sent to the WhatsApp group at a specific date and time. " +
-      "The reminder will mention specific users if provided.",
+      "Mentions are automatically captured from the message context - do not specify them manually.",
     parameters: {
       type: "object",
       properties: {
@@ -196,12 +209,6 @@ const availableFunctions: any[] = [
             "Extract the exact datetime phrase *as written by the user*, without modifying or interpreting it. " +
             "Do NOT convert formats. Do NOT standardize. Do NOT parse. Return the raw text the user typed " +
             "for when the reminder should be sent.",
-        },
-        mentions: {
-          type: "array",
-          items: { type: "string" },
-          description:
-            "Optional array of user phone numbers or names to mention in the reminder",
         },
       },
       required: ["message", "datetime"],
@@ -272,7 +279,8 @@ const availableFunctions: any[] = [
     type: "function",
     name: "create_task",
     description:
-      "Create a new task in the chat. Tasks are to-do items without specific deadlines.",
+      "Create a new task in the chat. Tasks are to-do items without specific deadlines. " +
+      "Tasks can be assigned to ONE person only.",
     parameters: {
       type: "object",
       properties: {
@@ -280,11 +288,15 @@ const availableFunctions: any[] = [
           type: "string",
           description: "The task title/description",
         },
-        assigned_to: {
-          type: "array",
-          items: { type: "string" },
+        assign_to_sender: {
+          type: "boolean",
           description:
-            "Optional array of user names or phone numbers to assign the task to",
+            "Set to true if the user wants to assign the task to themselves (e.g., 'assign to me', 'my task'). Default is false.",
+        },
+        use_first_mention: {
+          type: "boolean",
+          description:
+            "Set to true if the task should be assigned to the first person mentioned in the message (excluding the bot). Default is false.",
         },
       },
       required: ["title"],
@@ -409,19 +421,14 @@ export class AiService {
       // Get sender ID from the map, fallback to "system" if not found
       const senderId = this.senderIds.get(chatId) || "system";
 
-      // Get mentioned JIDs from the message context
+      // Get mentioned JIDs from the message context (automatic from WhatsApp)
       const contextMentions = this.mentionedJids.get(chatId) || [];
-
-      // Combine AI-provided mentions with context mentions (remove duplicates)
-      const allMentions = [
-        ...new Set([...(args.mentions || []), ...contextMentions]),
-      ];
 
       const reminder = await reminderService.createReminder(
         chatId,
         args.message,
         scheduledTime.utc,
-        allMentions,
+        contextMentions,
         senderId
       );
 
@@ -637,17 +644,38 @@ export class AiService {
     try {
       logger.info(`Creating task in chat ${chatId}:`, args);
 
+      let assignedTo: string | undefined = undefined;
+
+      // Determine who to assign the task to.
+      // New rule: if the user explicitly requested assignment to themselves
+      // (assign_to_sender) OR there are no mentions in the message, the task
+      // will be assigned to the senderId. If mentions exist, assign to the
+      // first mention (this matches 'assign to @someone' behavior).
+      const senderId = this.senderIds.get(chatId);
+      const mentions = this.mentionedJids.get(chatId) || [];
+
+      if (args.assign_to_sender) {
+        // Explicit instruction from AI to assign to sender
+        if (senderId) assignedTo = senderId;
+      } else if (mentions.length > 0) {
+        // There are mentions in the message — assign to the first one
+        assignedTo = mentions[0];
+      } else {
+        // No mentions and no explicit flag — default to assigning to sender
+        if (senderId) assignedTo = senderId;
+      }
+
       const task = await taskService.createTask({
         chatId,
         title: args.title,
-        assignedTo: args.assigned_to || [],
+        assignedTo: assignedTo ? [assignedTo] : [],
       });
 
       const taskNumber = taskService.formatTaskId(task.taskId);
       let message = `Task created: ${taskNumber}`;
 
-      if (args.assigned_to && args.assigned_to.length > 0) {
-        message += `\nAssigned to: ${args.assigned_to.join(", ")}`;
+      if (assignedTo) {
+        message += `\nAssigned to: ${assignedTo}`;
       }
 
       return JSON.stringify({
@@ -659,7 +687,7 @@ export class AiService {
           id: task.id,
           taskId: task.taskId,
           title: args.title,
-          assigned_to: args.assigned_to || [],
+          assigned_to: assignedTo ? [assignedTo] : [],
         },
       });
     } catch (error: any) {
@@ -945,19 +973,13 @@ export class AiService {
 
     let cleanText = text;
 
-    // 1) Remove lines that contain only mentions
-    cleanText = cleanText.replace(/^\s*@\d{5,20}(?:@\S+)?\s*$/gm, "");
-
-    // 2) Remove inline mentions anywhere in the text
-    cleanText = cleanText.replace(/@\d{5,20}(?:@\S+)?/g, "");
-
-    // 3) Remove invisible zero-width characters
+    // Remove invisible zero-width characters
     cleanText = cleanText.replace(/[\u200B-\u200D\uFEFF]/g, "");
 
-    // 4) Normalize multiple new lines to a single one
+    // Normalize multiple new lines to a single one
     cleanText = cleanText.replace(/\n{2,}/g, "\n");
 
-    // 5) Normalize spaces per line while preserving newlines
+    // Normalize spaces per line while preserving newlines
     cleanText = cleanText
       .split("\n")
       .map((line) => line.replace(/\s+/g, " ").trim())

@@ -187,7 +187,8 @@ export class TaskService {
           assignedTo: {
             has: userId,
           },
-          status: TaskStatus.Pending,
+          // Don't filter by status here - let the caller decide
+          // which statuses to include
         },
         orderBy: {
           createdAt: "desc",
@@ -198,6 +199,42 @@ export class TaskService {
     } catch (error) {
       logger.error(`Error getting tasks for user ${userId}:`, error);
       throw new Error("Failed to get user tasks");
+    }
+  }
+
+  /**
+   * Get recently completed or cancelled tasks (last 7 days)
+   */
+  async getRecentClosedTasks(
+    chatId: string,
+    days: number = 7
+  ): Promise<TaskDto[]> {
+    try {
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - days);
+
+      const tasks = await prisma.tasks.findMany({
+        where: {
+          chatId,
+          status: {
+            in: [TaskStatus.Done, TaskStatus.Cancelled],
+          },
+          updatedAt: {
+            gte: cutoffDate,
+          },
+        },
+        orderBy: {
+          updatedAt: "desc",
+        },
+      });
+
+      return tasks.map(this.toTaskDto);
+    } catch (error) {
+      logger.error(
+        `Error getting recent closed tasks for chat ${chatId}:`,
+        error
+      );
+      throw new Error("Failed to get recent closed tasks");
     }
   }
 

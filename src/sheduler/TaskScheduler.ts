@@ -185,7 +185,7 @@ export class TaskScheduler {
         return;
       }
 
-      // Get current time in Kuwait timezone
+      // Get current time in default timezone
       const now = DateTime.now().setZone(DEFAULT_TIMEZONE);
       const timeStr = now.toFormat("h:mm a");
       const dateStr = now.toFormat("EEEE, MMMM d, yyyy");
@@ -209,10 +209,10 @@ export class TaskScheduler {
       // Task statistics
       message += `📊 *Statistics:*\n`;
       message += `• Total: ${stats.total}\n`;
-      message += `• 🟡 Pending: ${stats.pending}\n`;
-      message += `• 🟠 In Progress: ${stats.inProgress}\n`;
-      message += `• 🟢 Done: ${stats.done}\n`;
-      message += `• 🔴 Cancelled: ${stats.cancelled}\n\n`;
+      message += `🟡 Pending: ${stats.pending}\n`;
+      message += `🟠 In Progress: ${stats.inProgress}\n`;
+      message += `🟢 Done: ${stats.done}\n`;
+      message += `🔴 Cancelled: ${stats.cancelled}\n\n`;
 
       // Group active tasks by assignee
       const activeTasks = [...pendingTasks, ...inProgressTasks];
