@@ -91,7 +91,11 @@ export class WhatsappService {
 
       return this.socket;
     } catch (error) {
-      logger.error("Failed to start WhatsApp service:", error);
+      logger.error("Failed to start WhatsApp service", {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        authPath: this.authPath,
+      });
       throw error;
     }
   }
@@ -117,14 +121,14 @@ export class WhatsappService {
     // Handle incoming messages
     this.socket.ev.on("messages.upsert", this.handleMessagesUpsert.bind(this));
 
-    // Handle message updates (read receipts, edits, etc.)
+    // Message updates - use debug level as these are verbose
     this.socket.ev.on("messages.update", (updates) => {
-      logger.debug("Messages updated:", updates);
+      logger.debug("Messages updated", { updateCount: updates.length });
     });
 
-    // Handle group updates
+    // Group updates - use debug level as these are verbose
     this.socket.ev.on("groups.update", (groups) => {
-      logger.debug("Groups updated:", groups);
+      logger.debug("Groups updated", { groupCount: groups.length });
     });
   }
 
@@ -146,7 +150,7 @@ export class WhatsappService {
       phoneNumber: me.phoneNumber,
     };
 
-    logger.info("Bot identity updated:", {
+    logger.debug("Bot identity updated", {
       jid: this.botIdentity.jid,
       lid: this.botIdentity.lid,
       name: this.botIdentity.name,
@@ -161,10 +165,10 @@ export class WhatsappService {
 
     // Display QR code for pairing
     if (qr) {
-      logger.info("QR Code generated. Please scan with WhatsApp:");
+      logger.info("QR code generated for WhatsApp pairing");
       qrcode.generate(qr, { small: true });
-      logger.info(
-        "Go to: WhatsApp → Settings → Linked Devices → Link a Device"
+      console.log(
+        "\nGo to: WhatsApp → Settings → Linked Devices → Link a Device\n"
       );
     }
 
@@ -191,9 +195,12 @@ export class WhatsappService {
         }
       }
 
-      logger.info("✅ Connected to WhatsApp successfully!");
-      logger.info("🤖 Bot Identity:", this.botIdentity);
-      logger.info("👂 Bot is ready and listening for mentions...");
+      logger.info("Connected to WhatsApp", {
+        jid: this.botIdentity.jid,
+        lid: this.botIdentity.lid,
+        name: this.botIdentity.name,
+        phoneNumber: this.botIdentity.phoneNumber,
+      });
     }
   }
 
@@ -207,30 +214,35 @@ export class WhatsappService {
         : true;
 
     if (!shouldReconnect) {
-      logger.error("Session logged out. Please restart and re-authenticate.");
+      logger.error("WhatsApp session logged out, authentication required");
       fs.rmSync(this.authPath, { recursive: true, force: true });
       return;
     }
 
     if (this.reconnectAttempts >= this.MAX_RECONNECT_ATTEMPTS) {
-      logger.error(
-        `Max reconnection attempts (${this.MAX_RECONNECT_ATTEMPTS}) reached. Giving up.`
-      );
+      logger.error("Maximum reconnection attempts reached", {
+        maxAttempts: this.MAX_RECONNECT_ATTEMPTS,
+        attempts: this.reconnectAttempts,
+      });
       return;
     }
 
     this.reconnectAttempts++;
     const delay = this.RECONNECT_DELAY_MS * this.reconnectAttempts;
 
-    logger.warn(
-      `Connection closed. Reconnecting in ${delay / 1000}s... (Attempt ${
-        this.reconnectAttempts
-      }/${this.MAX_RECONNECT_ATTEMPTS})`
-    );
+    logger.warn("Connection closed, attempting reconnect", {
+      attemptNumber: this.reconnectAttempts,
+      maxAttempts: this.MAX_RECONNECT_ATTEMPTS,
+      delaySeconds: delay / 1000,
+    });
 
     setTimeout(() => {
       this.start().catch((err) => {
-        logger.error("Failed to reconnect:", err);
+        logger.error("Reconnection failed", {
+          error: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack : undefined,
+          attemptNumber: this.reconnectAttempts,
+        });
       });
     }, delay);
   }
@@ -249,8 +261,12 @@ export class WhatsappService {
       try {
         await this.processMessage(msg);
       } catch (error) {
-        logger.error("Error processing message:", error);
-        // Continue processing other messages even if one fails
+        logger.error("Failed to process message", {
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+          messageId: msg.key.id,
+          chatId: msg.key.remoteJid,
+        });
       }
     }
   }
@@ -259,45 +275,37 @@ export class WhatsappService {
    * Process a single message
    */
   private async processMessage(msg: WAMessage): Promise<void> {
-    logger.info("Received message:", msg);
-
     // Ignore messages without content
     if (!msg.message) {
-      logger.debug("Received message without content, skipping.");
       return;
     }
 
     if (msg.key.fromMe) {
-      logger.debug("Received own message, skipping.");
       return;
     }
 
-    // Skip old messages (messages sent before bot started)
-    // Only process messages from the last 2 minutes
+    // Skip old messages (only process messages from the last 2 minutes)
     const messageTimestamp = msg.messageTimestamp as number;
     const currentTime = Math.floor(Date.now() / 1000);
     const messageAge = currentTime - messageTimestamp;
 
     if (messageAge > 120) {
-      logger.debug(`Skipping old message (${messageAge}s old) during sync.`);
+      logger.debug("Skipping old message", { messageAgeSeconds: messageAge });
       return;
     }
 
     // Extract message context
     const context = this.extractMessageContext(msg);
 
-    logger.info(
-      `Message from ${context.senderId} in ${context.chatId}${
-        context.isGroup ? " (group)" : ""
-      }`
-    );
-    logger.debug(`Message text: "${context.text}"`);
+    logger.debug("Processing message", {
+      chatId: context.chatId,
+      senderId: context.senderId,
+      isGroup: context.isGroup,
+      hasQuote: !!context.quotedMessage,
+    });
 
     // Check if this is a reply to bot's message
     const isReplyToBot = this.isBotRepliedTo(msg);
-    if (isReplyToBot) {
-      logger.info(`User ${msg.key.remoteJid} replied to bot's message`);
-    }
 
     // Handle ping command
     if (context.text.includes("/ping")) {
@@ -317,13 +325,15 @@ export class WhatsappService {
     const isMentioned = this.isBotMentioned(msg);
 
     if (!isMentioned && !isReplyToBot) {
-      logger.debug("Bot not mentioned or replied to, skipping message.");
       return;
     }
 
     // Rate limiting check
     if (!this.rateLimiter.tryConsume(context.senderId)) {
-      logger.warn(`Rate limit exceeded for user ${context.senderId}`);
+      logger.warn("Rate limit exceeded", {
+        senderId: context.senderId,
+        chatId: context.chatId,
+      });
       await this.sendMessage(context.chatId, {
         text: "Please slow down! You're sending too many messages.",
       });
@@ -345,9 +355,17 @@ export class WhatsappService {
       // Send reply
       await this.sendMessage(context.chatId, { text: reply });
 
-      logger.info(`✅ Sent AI reply to ${context.chatId}`);
+      logger.debug("AI reply sent", {
+        chatId: context.chatId,
+        senderId: context.senderId,
+      });
     } catch (error) {
-      logger.error("Error generating AI reply:", error);
+      logger.error("Failed to generate AI reply", {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        chatId: context.chatId,
+        senderId: context.senderId,
+      });
 
       // Send error message to user
       await this.sendMessage(context.chatId, {
@@ -463,7 +481,13 @@ export class WhatsappService {
 
       return false;
     } catch (error) {
-      logger.error(`Error handling command ${command}:`, error);
+      logger.error("Command execution failed", {
+        command,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        chatId: context.chatId,
+        senderId: context.senderId,
+      });
       await this.sendMessage(context.chatId, {
         text: "Sorry, an error occurred while processing the command.",
       });
@@ -744,7 +768,7 @@ export class WhatsappService {
               .join(", ")})`
           : "";
 
-      message += `* *${reminderNumber}* - ${reminder.message} - ${date} at ${time}${mentionsList}\n`;
+      message += `* *${reminderNumber}* - ${reminder.message} - ${date} at ${time}${mentionsList}\n\n`;
     }
 
     // Extract all mentions from reminders

@@ -46,12 +46,19 @@ export class TaskService {
         },
       });
 
-      logger.info(
-        `Created task ${task.id} (T-${task.taskId}) in chat ${input.chatId}`
-      );
+      logger.info("Task created", {
+        taskId: task.id,
+        taskNumber: task.taskId,
+        chatId: input.chatId,
+        assignedCount: input.assignedTo?.length || 0,
+      });
       return this.toTaskDto(task);
     } catch (error) {
-      logger.error("Error creating task:", error);
+      logger.error("Failed to create task", {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        chatId: input.chatId,
+      });
       throw new Error("Failed to create task");
     }
   }
@@ -79,7 +86,11 @@ export class TaskService {
 
       return tasks.map(this.toTaskDto);
     } catch (error) {
-      logger.error(`Error listing tasks for chat ${chatId}:`, error);
+      logger.error("Failed to list tasks", {
+        error: error instanceof Error ? error.message : String(error),
+        chatId,
+        status,
+      });
       throw new Error("Failed to list tasks");
     }
   }
@@ -95,7 +106,10 @@ export class TaskService {
 
       return task ? this.toTaskDto(task) : null;
     } catch (error) {
-      logger.error(`Error getting task ${taskId}:`, error);
+      logger.error("Failed to get task", {
+        error: error instanceof Error ? error.message : String(error),
+        taskId,
+      });
       return null;
     }
   }
@@ -117,7 +131,11 @@ export class TaskService {
 
       return task ? this.toTaskDto(task) : null;
     } catch (error) {
-      logger.error(`Error getting task #${taskNumber}:`, error);
+      logger.error("Failed to get task by number", {
+        error: error instanceof Error ? error.message : String(error),
+        taskNumber,
+        chatId,
+      });
       return null;
     }
   }
@@ -144,10 +162,18 @@ export class TaskService {
         data: updateData,
       });
 
-      logger.info(`Updated task ${taskId} (T-${task.taskId})`);
+      logger.info("Task updated", {
+        taskId: task.id,
+        taskNumber: task.taskId,
+        status: task.status,
+      });
       return this.toTaskDto(task);
     } catch (error) {
-      logger.error(`Error updating task ${taskId}:`, error);
+      logger.error("Failed to update task", {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        taskId,
+      });
       throw new Error("Failed to update task");
     }
   }
@@ -168,10 +194,13 @@ export class TaskService {
         where: { id: taskId },
       });
 
-      logger.info(`Deleted task ${taskId}`);
+      logger.info("Task deleted", { taskId });
       return true;
     } catch (error) {
-      logger.error(`Error deleting task ${taskId}:`, error);
+      logger.error("Failed to delete task", {
+        error: error instanceof Error ? error.message : String(error),
+        taskId,
+      });
       return false;
     }
   }
@@ -197,8 +226,12 @@ export class TaskService {
 
       return tasks.map(this.toTaskDto);
     } catch (error) {
-      logger.error(`Error getting tasks for user ${userId}:`, error);
-      throw new Error("Failed to get user tasks");
+      logger.error("Failed to get tasks for user", {
+        error: error instanceof Error ? error.message : String(error),
+        userId,
+        chatId,
+      });
+      throw new Error("Failed to get tasks for user");
     }
   }
 
@@ -230,10 +263,11 @@ export class TaskService {
 
       return tasks.map(this.toTaskDto);
     } catch (error) {
-      logger.error(
-        `Error getting recent closed tasks for chat ${chatId}:`,
-        error
-      );
+      logger.error("Failed to get recent closed tasks", {
+        error: error instanceof Error ? error.message : String(error),
+        chatId,
+        days,
+      });
       throw new Error("Failed to get recent closed tasks");
     }
   }
@@ -261,7 +295,10 @@ export class TaskService {
 
       return { total, pending, inProgress, done, cancelled };
     } catch (error) {
-      logger.error(`Error getting task stats for chat ${chatId}:`, error);
+      logger.error("Failed to get task statistics", {
+        error: error instanceof Error ? error.message : String(error),
+        chatId,
+      });
       throw new Error("Failed to get task statistics");
     }
   }
@@ -289,10 +326,18 @@ export class TaskService {
         },
       });
 
-      logger.info(`Cleaned up ${result.count} old tasks from chat ${chatId}`);
+      logger.info("Old tasks cleaned up", {
+        count: result.count,
+        chatId,
+        olderThanDays,
+      });
       return result.count;
     } catch (error) {
-      logger.error(`Error cleaning up tasks for chat ${chatId}:`, error);
+      logger.error("Failed to cleanup old tasks", {
+        error: error instanceof Error ? error.message : String(error),
+        chatId,
+        olderThanDays,
+      });
       return 0;
     }
   }

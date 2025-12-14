@@ -11,7 +11,7 @@ let whatsappService: any = null;
  */
 export function setWhatsappService(service: any): void {
   whatsappService = service;
-  logger.info("WhatsApp service connected to ReminderScheduler");
+  logger.info("WhatsApp service connected", { scheduler: "ReminderScheduler" });
 }
 
 /**
@@ -27,14 +27,14 @@ export class ReminderScheduler {
   private dailyDigestJob: schedule.Job | null = null;
 
   constructor() {
-    logger.info("ReminderScheduler initialized");
+    logger.debug("ReminderScheduler initialized");
   }
 
   /**
    * Start the scheduler - checks every minute for upcoming reminders
    */
   async start(): Promise<void> {
-    logger.info("🚀 Starting ReminderScheduler...");
+    logger.info("Starting ReminderScheduler");
 
     // Load existing active reminders from database
     await this.loadActiveReminders();
@@ -47,14 +47,14 @@ export class ReminderScheduler {
       await this.checkAndSendDueReminders();
     }, 60000); // Every 60 seconds
 
-    logger.info("✅ ReminderScheduler started successfully");
+    logger.info("ReminderScheduler started successfully");
   }
 
   /**
    * Stop the scheduler
    */
   stop(): void {
-    logger.info("Stopping ReminderScheduler...");
+    logger.info("Stopping ReminderScheduler");
 
     if (this.checkInterval) {
       clearInterval(this.checkInterval);
@@ -70,11 +70,13 @@ export class ReminderScheduler {
     // Cancel all scheduled jobs
     for (const [reminderId, jobs] of this.jobs.entries()) {
       jobs.forEach((job) => job.cancel());
-      logger.info(`Cancelled jobs for reminder ${reminderId}`);
     }
 
+    logger.info("ReminderScheduler stopped", {
+      cancelledReminders: this.jobs.size,
+    });
+
     this.jobs.clear();
-    logger.info("ReminderScheduler stopped");
   }
 
   /**
@@ -91,7 +93,7 @@ export class ReminderScheduler {
         },
       });
 
-      logger.info(`Loading ${activeReminders.length} active reminders`);
+      logger.info("Active reminders loaded", { count: activeReminders.length });
 
       for (const reminder of activeReminders) {
         this.scheduleReminder(
@@ -103,7 +105,10 @@ export class ReminderScheduler {
         );
       }
     } catch (error) {
-      logger.error("Error loading active reminders:", error);
+      logger.error("Failed to load active reminders", {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
     }
   }
 
@@ -130,9 +135,10 @@ export class ReminderScheduler {
           await this.send24HourReminder(reminderId);
         });
         jobs.push(job);
-        logger.info(
-          `Scheduled 24h reminder for ${reminderId} at ${twentyFourHoursBefore.toISOString()}`
-        );
+        logger.debug("Scheduled 24h reminder", {
+          reminderId,
+          scheduledTime: twentyFourHoursBefore.toISOString(),
+        });
       }
     }
 
@@ -144,9 +150,10 @@ export class ReminderScheduler {
           await this.send1HourReminder(reminderId);
         });
         jobs.push(job);
-        logger.info(
-          `Scheduled 1h reminder for ${reminderId} at ${oneHourBefore.toISOString()}`
-        );
+        logger.debug("Scheduled 1h reminder", {
+          reminderId,
+          scheduledTime: oneHourBefore.toISOString(),
+        });
       }
     }
 
@@ -160,9 +167,10 @@ export class ReminderScheduler {
           await this.send30MinuteReminder(reminderId);
         });
         jobs.push(job);
-        logger.info(
-          `Scheduled 30m reminder for ${reminderId} at ${thirtyMinutesBefore.toISOString()}`
-        );
+        logger.debug("Scheduled 30m reminder", {
+          reminderId,
+          scheduledTime: thirtyMinutesBefore.toISOString(),
+        });
       }
     }
 
@@ -172,9 +180,10 @@ export class ReminderScheduler {
         await this.sendFinalReminder(reminderId);
       });
       jobs.push(job);
-      logger.info(
-        `Scheduled final reminder for ${reminderId} at ${remindAtUtc.toISOString()}`
-      );
+      logger.debug("Scheduled final reminder", {
+        reminderId,
+        scheduledTime: remindAtUtc.toISOString(),
+      });
     }
 
     if (jobs.length > 0) {
@@ -190,7 +199,7 @@ export class ReminderScheduler {
     if (jobs) {
       jobs.forEach((job) => job.cancel());
       this.jobs.delete(reminderId);
-      logger.info(`Cancelled all jobs for reminder ${reminderId}`);
+      logger.debug("Cancelled reminder jobs", { reminderId });
     }
   }
 
@@ -207,7 +216,7 @@ export class ReminderScheduler {
         return;
       }
 
-      logger.info(`Sending 24h advance reminder for ${reminderId}`);
+      logger.debug("Sending 24h advance reminder", { reminderId });
 
       // Get local time components
       const dt = DateTime.fromJSDate(reminder.remindAtUtc, {
@@ -245,15 +254,21 @@ export class ReminderScheduler {
             text: message,
             mentions: mentions,
           });
-          logger.info(`✅ 24h WhatsApp message sent for ${reminderId}`);
+          logger.info("24h reminder sent", {
+            reminderId,
+            chatId: reminder.chatId,
+            mentionCount: mentions.length,
+          });
         } catch (error) {
-          logger.error(
-            `Failed to send 24h WhatsApp message for ${reminderId}:`,
-            error
-          );
+          logger.error("Failed to send 24h WhatsApp message", {
+            error: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack : undefined,
+            reminderId,
+            chatId: reminder.chatId,
+          });
         }
       } else {
-        logger.warn("WhatsApp service not available for sending 24h reminder");
+        logger.warn("WhatsApp service not available for 24h reminder");
       }
 
       // Mark as sent
@@ -261,10 +276,12 @@ export class ReminderScheduler {
         where: { id: reminderId },
         data: { reminder24hSent: true },
       });
-
-      logger.info(`✅ 24h reminder sent for ${reminderId}`);
     } catch (error) {
-      logger.error(`Error sending 24h reminder for ${reminderId}:`, error);
+      logger.error("Error sending 24h reminder", {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        reminderId,
+      });
     }
   }
 
@@ -281,7 +298,7 @@ export class ReminderScheduler {
         return;
       }
 
-      logger.info(`Sending 1h advance reminder for ${reminderId}`);
+      logger.debug("Sending 1h advance reminder", { reminderId });
 
       // Get local time components
       const dt = DateTime.fromJSDate(reminder.remindAtUtc, {
@@ -319,15 +336,21 @@ export class ReminderScheduler {
             text: message,
             mentions: mentions,
           });
-          logger.info(`✅ 1h WhatsApp message sent for ${reminderId}`);
+          logger.info("1h reminder sent", {
+            reminderId,
+            chatId: reminder.chatId,
+            mentionCount: mentions.length,
+          });
         } catch (error) {
-          logger.error(
-            `Failed to send 1h WhatsApp message for ${reminderId}:`,
-            error
-          );
+          logger.error("Failed to send 1h WhatsApp message", {
+            error: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack : undefined,
+            reminderId,
+            chatId: reminder.chatId,
+          });
         }
       } else {
-        logger.warn("WhatsApp service not available for sending 1h reminder");
+        logger.warn("WhatsApp service not available for 1h reminder");
       }
 
       // Mark as sent
@@ -335,10 +358,12 @@ export class ReminderScheduler {
         where: { id: reminderId },
         data: { reminder1hSent: true },
       });
-
-      logger.info(`✅ 1h reminder sent for ${reminderId}`);
     } catch (error) {
-      logger.error(`Error sending 1h reminder for ${reminderId}:`, error);
+      logger.error("Error sending 1h reminder", {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        reminderId,
+      });
     }
   }
 
@@ -355,7 +380,7 @@ export class ReminderScheduler {
         return;
       }
 
-      logger.info(`Sending 30m advance reminder for ${reminderId}`);
+      logger.debug("Sending 30m advance reminder", { reminderId });
 
       // Get local time components
       const dt = DateTime.fromJSDate(reminder.remindAtUtc, {
@@ -393,15 +418,21 @@ export class ReminderScheduler {
             text: message,
             mentions: mentions,
           });
-          logger.info(`✅ 30m WhatsApp message sent for ${reminderId}`);
+          logger.info("30m reminder sent", {
+            reminderId,
+            chatId: reminder.chatId,
+            mentionCount: mentions.length,
+          });
         } catch (error) {
-          logger.error(
-            `Failed to send 30m WhatsApp message for ${reminderId}:`,
-            error
-          );
+          logger.error("Failed to send 30m WhatsApp message", {
+            error: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack : undefined,
+            reminderId,
+            chatId: reminder.chatId,
+          });
         }
       } else {
-        logger.warn("WhatsApp service not available for sending 30m reminder");
+        logger.warn("WhatsApp service not available for 30m reminder");
       }
 
       // Mark as sent
@@ -409,10 +440,12 @@ export class ReminderScheduler {
         where: { id: reminderId },
         data: { reminder30mSent: true },
       });
-
-      logger.info(`✅ 30m reminder sent for ${reminderId}`);
     } catch (error) {
-      logger.error(`Error sending 30m reminder for ${reminderId}:`, error);
+      logger.error("Error sending 30m reminder", {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        reminderId,
+      });
     }
   }
 
@@ -429,7 +462,7 @@ export class ReminderScheduler {
         return;
       }
 
-      logger.info(`Sending final reminder for ${reminderId}`);
+      logger.debug("Sending final reminder", { reminderId });
 
       // Get local time components
       const dt = DateTime.fromJSDate(reminder.remindAtUtc, {
@@ -467,17 +500,21 @@ export class ReminderScheduler {
             text: message,
             mentions: mentions,
           });
-          logger.info(`✅ Final WhatsApp message sent for ${reminderId}`);
+          logger.info("Final reminder sent", {
+            reminderId,
+            chatId: reminder.chatId,
+            mentionCount: mentions.length,
+          });
         } catch (error) {
-          logger.error(
-            `Failed to send final WhatsApp message for ${reminderId}:`,
-            error
-          );
+          logger.error("Failed to send final WhatsApp message", {
+            error: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack : undefined,
+            reminderId,
+            chatId: reminder.chatId,
+          });
         }
       } else {
-        logger.warn(
-          "WhatsApp service not available for sending final reminder"
-        );
+        logger.warn("WhatsApp service not available for final reminder");
       }
 
       // Mark as sent and clean up jobs
@@ -487,10 +524,12 @@ export class ReminderScheduler {
       });
 
       this.jobs.delete(reminderId);
-
-      logger.info(`✅ Final reminder sent for ${reminderId}`);
     } catch (error) {
-      logger.error(`Error sending final reminder for ${reminderId}:`, error);
+      logger.error("Error sending final reminder", {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        reminderId,
+      });
     }
   }
 
@@ -600,7 +639,10 @@ export class ReminderScheduler {
       await this.sendDailyDigest();
     });
 
-    logger.info("📅 Daily digest scheduled for 8:00 AM (Kuwait time)");
+    logger.info("Daily digest scheduled", {
+      time: "08:00",
+      timezone: "Asia/Kuwait",
+    });
   }
 
   /**
@@ -608,7 +650,7 @@ export class ReminderScheduler {
    */
   private async sendDailyDigest(): Promise<void> {
     try {
-      logger.info("Sending daily digest...");
+      logger.debug("Sending daily digest");
 
       // Get all active reminders for today
       const today = DateTime.now().setZone("Asia/Kuwait");
@@ -630,7 +672,7 @@ export class ReminderScheduler {
       });
 
       if (reminders.length === 0) {
-        logger.info("No reminders for today, skipping daily digest");
+        logger.debug("No reminders for today, skipping daily digest");
         return;
       }
 
@@ -647,9 +689,15 @@ export class ReminderScheduler {
         await this.sendChatDailyDigest(chatId, chatReminders);
       }
 
-      logger.info(`✅ Daily digest sent to ${remindersByChat.size} chat(s)`);
+      logger.info("Daily digest sent", {
+        chatCount: remindersByChat.size,
+        reminderCount: reminders.length,
+      });
     } catch (error) {
-      logger.error("Error sending daily digest:", error);
+      logger.error("Error sending daily digest", {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
     }
   }
 

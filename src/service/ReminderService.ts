@@ -107,7 +107,12 @@ export class ReminderService {
       },
     });
 
-    logger.info(`Created reminder ${reminder.id} for chat ${chatId}`);
+    logger.info("Reminder created", {
+      reminderId: reminder.id,
+      chatId,
+      scheduledTime: reminder.remindAtUtc.toISOString(),
+      mentionCount: mentions?.length || 0,
+    });
 
     // Add to scheduler
     await reminderScheduler.addReminder(
