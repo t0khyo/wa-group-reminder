@@ -221,11 +221,10 @@ export class ReminderScheduler {
       // Send WhatsApp message
       if (whatsappService) {
         let message = `⏰ *Reminder in 24 hours!*\n\n`;
-        message += `*Meeting Schedule*\n\n`;
+        message += `*${reminder.title}*\n\n`;
         message += `Date: ${date}\n`;
         message += `Day: ${day}\n`;
-        message += `Time: ${time}\n`;
-        message += `Title: ${reminder.title}`;
+        message += `Time: ${time}`;
 
         // Build mentions array (include existing mentions + sender)
         const mentions = [...reminder.mentions];
@@ -296,11 +295,10 @@ export class ReminderScheduler {
       // Send WhatsApp message
       if (whatsappService) {
         let message = `⏰ *Reminder in 1 hour!*\n\n`;
-        message += `*Meeting Schedule*\n\n`;
+        message += `*${reminder.title}*\n\n`;
         message += `Date: ${date}\n`;
         message += `Day: ${day}\n`;
-        message += `Time: ${time}\n`;
-        message += `Title: ${reminder.title}`;
+        message += `Time: ${time}`;
 
         // Build mentions array (include existing mentions + sender)
         const mentions = [...reminder.mentions];
@@ -371,11 +369,10 @@ export class ReminderScheduler {
       // Send WhatsApp message
       if (whatsappService) {
         let message = `⏰ *Reminder in 30 minutes!*\n\n`;
-        message += `*Meeting Schedule*\n\n`;
+        message += `*${reminder.title}*\n\n`;
         message += `Date: ${date}\n`;
         message += `Day: ${day}\n`;
-        message += `Time: ${time}\n`;
-        message += `Title: ${reminder.title}`;
+        message += `Time: ${time}`;
 
         // Build mentions array (include existing mentions + sender)
         const mentions = [...reminder.mentions];
@@ -446,11 +443,10 @@ export class ReminderScheduler {
       // Send WhatsApp message
       if (whatsappService) {
         let message = `🔔 *REMINDER NOW!*\n\n`;
-        message += `*Meeting Schedule*\n\n`;
+        message += `*${reminder.title}*\n\n`;
         message += `Date: ${date}\n`;
         message += `Day: ${day}\n`;
-        message += `Time: ${time}\n`;
-        message += `Title: ${reminder.title}`;
+        message += `Time: ${time}`;
 
         // Build mentions array (include existing mentions + sender)
         const mentions = [...reminder.mentions];

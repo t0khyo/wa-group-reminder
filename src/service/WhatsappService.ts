@@ -16,6 +16,7 @@ import { RateLimiter } from "../utils/RateLimiter.js";
 import { taskService } from "./TaskService.js";
 import { reminderService } from "./ReminderService.js";
 import { TaskStatus } from "../generated/prisma/client.js";
+import { DateTime } from "luxon";
 import fs from "fs";
 
 // Type definitions
@@ -386,6 +387,15 @@ export class WhatsappService {
           await this.handleAllTasksCommand(context);
           return true;
 
+        case "/reminders":
+        case "/reminder":
+        case "/meetings":
+        case "/meeting":
+        case "/my-reminders":
+        case "/my-meetings":
+          await this.handleMyRemindersCommand(context);
+          return true;
+
         case "/all-reminders":
         case "/all-reminder":
         case "/all-r":
@@ -393,8 +403,6 @@ export class WhatsappService {
         case "/all-meetings":
         case "/all-meeting":
         case "/all-m":
-        case "/meetings":
-        case "/reminders":
           await this.handleAllRemindersCommand(context);
           return true;
 
@@ -426,6 +434,9 @@ export class WhatsappService {
           case "all-tasks":
             await this.handleAllTasksCommand(context);
             return true;
+          case "reminders":
+            await this.handleMyRemindersCommand(context);
+            return true;
           case "all-reminders":
             await this.handleAllRemindersCommand(context);
             return true;
@@ -456,7 +467,19 @@ export class WhatsappService {
       { name: "help", variants: ["/help"] },
       { name: "tasks", variants: ["/tasks", "/mytasks", "/my-tasks"] },
       { name: "all-tasks", variants: ["/all-tasks", "/allt", "/all"] },
-      { name: "all-reminders", variants: ["/all-reminders", "/allreminders", "/all-meetings", "/allmeetings", "/meetings", "/reminders"] },
+      {
+        name: "reminders",
+        variants: ["/reminders", "/meetings", "/my-reminders", "/my-meetings"],
+      },
+      {
+        name: "all-reminders",
+        variants: [
+          "/all-reminders",
+          "/allreminders",
+          "/all-meetings",
+          "/allmeetings",
+        ],
+      },
       { name: "recent-tasks", variants: ["/recent-tasks", "/recenttasks"] },
       { name: "task-digest", variants: ["/task-digest", "/taskdigest"] },
     ];
@@ -490,7 +513,8 @@ export class WhatsappService {
 📝 *Commands:*
 • \`/tasks\` - Your active tasks
 • \`/all-tasks\` - All group tasks
-• \`/all-reminders\` - All active reminders
+• \`/reminders\` - Your active reminders
+• \`/all-reminders\` - All group reminders
 • \`/recent-tasks\` - Recently closed
 • \`/task-digest\` - Manual digest
 • \`/ping\` - Test bot
@@ -504,6 +528,86 @@ export class WhatsappService {
 
     await this.sendMessage(context.chatId, {
       text: message,
+    });
+  }
+
+  /**
+   * Handle /reminders or /meetings command - show sender's active reminders
+   */
+  private async handleMyRemindersCommand(
+    context: MessageContext
+  ): Promise<void> {
+    const allReminders = await reminderService.listReminders(
+      context.chatId,
+      "active"
+    );
+
+    // Filter reminders where the sender is mentioned or is the creator
+    const myReminders = allReminders.filter(
+      (r) =>
+        r.mentions?.includes(context.senderId) ||
+        r.createdBy === context.senderId
+    );
+
+    if (myReminders.length === 0) {
+      await this.sendMessage(context.chatId, {
+        text: `> @${this.cleanJidForDisplay(
+          context.senderId
+        )}\n\n📅 You have no active reminders.`,
+        mentions: [context.senderId],
+      });
+      return;
+    }
+
+    let message = `> @${this.cleanJidForDisplay(context.senderId)}\n\n`;
+    message += `You have *${myReminders.length}* Active Reminder${
+      myReminders.length > 1 ? "s" : ""
+    }\n\n`;
+
+    for (const reminder of myReminders) {
+      const reminderNumber = reminderService.formatReminderId(
+        reminder.reminderId
+      );
+
+      // Parse the scheduled time to get individual components
+      const dt = DateTime.fromJSDate(reminder.scheduledTime, {
+        zone: "Asia/Kuwait",
+      });
+
+      const date = dt.toFormat("d MMM yyyy");
+      const day = dt.toFormat("EEEE");
+      const time = dt.toFormat("h:mm a");
+
+      message += `*${reminderNumber}* - ${reminder.message}\n\n`;
+      message += `Date: ${date}\n`;
+      message += `Day: ${day}\n`;
+      message += `Time: ${time}`;
+
+      if (reminder.mentions && reminder.mentions.length > 0) {
+        const mentionsList = reminder.mentions
+          .map((m) => `> @${this.cleanJidForDisplay(m)}`)
+          .join("\n");
+        message += `\n\n${mentionsList}`;
+      }
+
+      message += `\n\n---\n\n`;
+    }
+
+    // Extract all unique mentions from the sender's reminders
+    const mentions: string[] = [context.senderId];
+    for (const reminder of myReminders) {
+      if (reminder.mentions) {
+        for (const mention of reminder.mentions) {
+          if (!mentions.includes(mention)) {
+            mentions.push(mention);
+          }
+        }
+      }
+    }
+
+    await this.sendMessage(context.chatId, {
+      text: message,
+      mentions: mentions,
     });
   }
 
@@ -528,24 +632,32 @@ export class WhatsappService {
     let message = `📅 *Active Reminders* (${activeReminders.length})\n\n`;
 
     for (const reminder of activeReminders) {
-      const reminderNumber = reminderService.formatReminderId(reminder.reminderId);
-      const dateStr = reminder.scheduledTime.toLocaleString("en-US", {
-        timeZone: "Asia/Kuwait",
-        dateStyle: "medium",
-        timeStyle: "short",
+      const reminderNumber = reminderService.formatReminderId(
+        reminder.reminderId
+      );
+
+      // Parse the scheduled time to get individual components
+      const dt = DateTime.fromJSDate(reminder.scheduledTime, {
+        zone: "Asia/Kuwait",
       });
 
-      message += `*${reminderNumber}* - ${reminder.message}\n`;
-      message += `⏰ ${dateStr}\n`;
-      
+      const date = dt.toFormat("d MMM yyyy");
+      const day = dt.toFormat("EEEE");
+      const time = dt.toFormat("h:mm a");
+
+      message += `*${reminderNumber}* - ${reminder.message}\n\n`;
+      message += `Date: ${date}\n`;
+      message += `Day: ${day}\n`;
+      message += `Time: ${time}`;
+
       if (reminder.mentions && reminder.mentions.length > 0) {
         const mentionsList = reminder.mentions
-          .map(m => `@${this.cleanJidForDisplay(m)}`)
-          .join(", ");
-        message += `👥 ${mentionsList}\n`;
+          .map((m) => `> @${this.cleanJidForDisplay(m)}`)
+          .join("\n");
+        message += `\n\n${mentionsList}`;
       }
-      
-      message += `\n`;
+
+      message += `\n\n---\n\n`;
     }
 
     // Extract all mentions from reminders
