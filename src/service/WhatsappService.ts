@@ -493,6 +493,15 @@ export class WhatsappService {
         ],
       },
       { name: "recent-tasks", variants: ["/recent-tasks", "/recenttasks"] },
+      {
+        name: "recent-reminders",
+        variants: [
+          "/recent-reminders",
+          "/recentreminders",
+          "/recent-meetings",
+          "/recentmeetings",
+        ],
+      },
       { name: "task-digest", variants: ["/task-digest", "/taskdigest"] },
     ];
 
@@ -531,6 +540,7 @@ export class WhatsappService {
 *Reminder Commands:*
 • \`/reminders\` or \`/meetings\` - Your active reminders
 • \`/all-reminders\` or \`/all-meetings\` - All group reminders
+• \`/recent-reminders\` or \`/recent-meetings\` - Recently completed reminders
 
 *Other:*
 • \`/help\` - Show this message
@@ -679,6 +689,67 @@ export class WhatsappService {
     // Extract all mentions from reminders
     const mentions: string[] = [];
     for (const reminder of activeReminders) {
+      if (reminder.mentions) {
+        for (const mention of reminder.mentions) {
+          if (!mentions.includes(mention)) {
+            mentions.push(mention);
+          }
+        }
+      }
+    }
+
+    await this.sendMessage(context.chatId, {
+      text: message,
+      mentions: mentions.length > 0 ? mentions : undefined,
+    });
+  }
+
+  /**
+   * Handle /recent-reminders or /recent-meetings command - show recently completed reminders
+   */
+  private async handleRecentRemindersCommand(
+    context: MessageContext
+  ): Promise<void> {
+    const recentReminders = await reminderService.getRecentCompletedReminders(
+      context.chatId
+    );
+
+    if (recentReminders.length === 0) {
+      await this.sendMessage(context.chatId, {
+        text: "No reminders completed in the last 7 days.",
+      });
+      return;
+    }
+
+    let message = `*Recently Completed Reminders* (Last 7 days)\n\n`;
+    message += `✅ *Completed (${recentReminders.length}):*\n`;
+
+    for (const reminder of recentReminders) {
+      const reminderNumber = reminderService.formatReminderId(
+        reminder.reminderId
+      );
+
+      // Parse the scheduled time to get individual components
+      const dt = DateTime.fromJSDate(reminder.scheduledTime, {
+        zone: "Asia/Kuwait",
+      });
+
+      const date = dt.toFormat("d MMM yyyy");
+      const time = dt.toFormat("h:mm a");
+
+      const mentionsList =
+        reminder.mentions && reminder.mentions.length > 0
+          ? ` (${reminder.mentions
+              .map((m) => `@${this.cleanJidForDisplay(m)}`)
+              .join(", ")})`
+          : "";
+
+      message += `* *${reminderNumber}* - ${reminder.message} - ${date} at ${time}${mentionsList}\n`;
+    }
+
+    // Extract all mentions from reminders
+    const mentions: string[] = [];
+    for (const reminder of recentReminders) {
       if (reminder.mentions) {
         for (const mention of reminder.mentions) {
           if (!mentions.includes(mention)) {
