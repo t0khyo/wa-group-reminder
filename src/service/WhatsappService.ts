@@ -14,6 +14,7 @@ import logger from "../utils/logger.js";
 import { AiService } from "./AiService.js";
 import { RateLimiter } from "../utils/RateLimiter.js";
 import { taskService } from "./TaskService.js";
+import { reminderService } from "./ReminderService.js";
 import { TaskStatus } from "../generated/prisma/client.js";
 import fs from "fs";
 
@@ -364,30 +365,80 @@ export class WhatsappService {
     const command = context.text.split(" ")[0].toLowerCase();
 
     try {
+      // Exact matches first
       switch (command) {
         case "/help":
+        case "/h":
           await this.handleHelpCommand(context);
           return true;
 
         case "/tasks":
+        case "/task":
+        case "/t":
           await this.handleMyTasksCommand(context);
           return true;
 
         case "/all-tasks":
+        case "/all-task":
+        case "/all-t":
+        case "/alltasks":
+        case "/alltask":
           await this.handleAllTasksCommand(context);
           return true;
 
+        case "/all-reminders":
+        case "/all-reminder":
+        case "/all-r":
+        case "/allreminders":
+        case "/all-meetings":
+        case "/all-meeting":
+        case "/all-m":
+        case "/meetings":
+        case "/reminders":
+          await this.handleAllRemindersCommand(context);
+          return true;
+
         case "/recent-tasks":
+        case "/recent-task":
+        case "/recent-t":
+        case "/recent":
+        case "/r":
           await this.handleRecentTasksCommand(context);
           return true;
 
         case "/task-digest":
+        case "/digest":
+        case "/d":
           await this.handleTaskDigestCommand(context);
           return true;
-
-        default:
-          return false;
       }
+
+      // Fuzzy matching for partial commands
+      const matchedCommand = this.findSimilarCommand(command);
+      if (matchedCommand) {
+        switch (matchedCommand) {
+          case "help":
+            await this.handleHelpCommand(context);
+            return true;
+          case "tasks":
+            await this.handleMyTasksCommand(context);
+            return true;
+          case "all-tasks":
+            await this.handleAllTasksCommand(context);
+            return true;
+          case "all-reminders":
+            await this.handleAllRemindersCommand(context);
+            return true;
+          case "recent-tasks":
+            await this.handleRecentTasksCommand(context);
+            return true;
+          case "task-digest":
+            await this.handleTaskDigestCommand(context);
+            return true;
+        }
+      }
+
+      return false;
     } catch (error) {
       logger.error(`Error handling command ${command}:`, error);
       await this.sendMessage(context.chatId, {
@@ -395,6 +446,39 @@ export class WhatsappService {
       });
       return true;
     }
+  }
+
+  /**
+   * Find similar command using fuzzy matching
+   */
+  private findSimilarCommand(input: string): string | null {
+    const commands = [
+      { name: "help", variants: ["/help"] },
+      { name: "tasks", variants: ["/tasks", "/mytasks", "/my-tasks"] },
+      { name: "all-tasks", variants: ["/all-tasks", "/allt", "/all"] },
+      { name: "all-reminders", variants: ["/all-reminders", "/allreminders", "/all-meetings", "/allmeetings", "/meetings", "/reminders"] },
+      { name: "recent-tasks", variants: ["/recent-tasks", "/recenttasks"] },
+      { name: "task-digest", variants: ["/task-digest", "/taskdigest"] },
+    ];
+
+    const cleanInput = input.replace(/^\//, "").toLowerCase();
+
+    // Find command that starts with the input
+    for (const cmd of commands) {
+      if (cmd.name.startsWith(cleanInput) && cleanInput.length >= 2) {
+        return cmd.name;
+      }
+
+      // Check variants
+      for (const variant of cmd.variants) {
+        const cleanVariant = variant.replace(/^\//, "").toLowerCase();
+        if (cleanVariant.startsWith(cleanInput) && cleanInput.length >= 2) {
+          return cmd.name;
+        }
+      }
+    }
+
+    return null;
   }
 
   /**
@@ -406,6 +490,7 @@ export class WhatsappService {
 📝 *Commands:*
 • \`/tasks\` - Your active tasks
 • \`/all-tasks\` - All group tasks
+• \`/all-reminders\` - All active reminders
 • \`/recent-tasks\` - Recently closed
 • \`/task-digest\` - Manual digest
 • \`/ping\` - Test bot
@@ -419,6 +504,65 @@ export class WhatsappService {
 
     await this.sendMessage(context.chatId, {
       text: message,
+    });
+  }
+
+  /**
+   * Handle /all-reminders command - show all active reminders/meetings
+   */
+  private async handleAllRemindersCommand(
+    context: MessageContext
+  ): Promise<void> {
+    const activeReminders = await reminderService.listReminders(
+      context.chatId,
+      "active"
+    );
+
+    if (activeReminders.length === 0) {
+      await this.sendMessage(context.chatId, {
+        text: "📅 No active reminders scheduled.",
+      });
+      return;
+    }
+
+    let message = `📅 *Active Reminders* (${activeReminders.length})\n\n`;
+
+    for (const reminder of activeReminders) {
+      const reminderNumber = reminderService.formatReminderId(reminder.reminderId);
+      const dateStr = reminder.scheduledTime.toLocaleString("en-US", {
+        timeZone: "Asia/Kuwait",
+        dateStyle: "medium",
+        timeStyle: "short",
+      });
+
+      message += `*${reminderNumber}* - ${reminder.message}\n`;
+      message += `⏰ ${dateStr}\n`;
+      
+      if (reminder.mentions && reminder.mentions.length > 0) {
+        const mentionsList = reminder.mentions
+          .map(m => `@${this.cleanJidForDisplay(m)}`)
+          .join(", ");
+        message += `👥 ${mentionsList}\n`;
+      }
+      
+      message += `\n`;
+    }
+
+    // Extract all mentions from reminders
+    const mentions: string[] = [];
+    for (const reminder of activeReminders) {
+      if (reminder.mentions) {
+        for (const mention of reminder.mentions) {
+          if (!mentions.includes(mention)) {
+            mentions.push(mention);
+          }
+        }
+      }
+    }
+
+    await this.sendMessage(context.chatId, {
+      text: message,
+      mentions: mentions.length > 0 ? mentions : undefined,
     });
   }
 
@@ -629,10 +773,6 @@ export class WhatsappService {
   ): Promise<void> {
     // Import TaskScheduler dynamically to avoid circular dependency
     const { taskScheduler } = await import("../sheduler/TaskScheduler.js");
-
-    await this.sendMessage(context.chatId, {
-      text: "📊 Generating task digest...",
-    });
 
     await taskScheduler.sendManualDigest(context.chatId, "morning");
 
