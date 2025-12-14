@@ -310,22 +310,23 @@ export class WhatsappService {
     // Check if bot is mentioned or replied to
     const isMentioned = this.isBotMentioned(msg);
 
-    if (!isMentioned && !isReplyToBot) {
-      return;
-    }
-
-    // Handle ping command
+    // Handle ping command (works without mention)
     if (context.text.includes("/ping")) {
       await this.sendMessage(context.chatId, { text: "Pong 🏓" });
       return;
     }
 
-    // Handle slash commands (dev mode) - don't send to AI if command is handled
+    // Handle slash commands (works without mention) - don't send to AI if command is handled
     if (context.text.startsWith("/")) {
       const handled = await this.handleCommand(context);
       if (handled) {
         return; // Command was processed, don't send to AI
       }
+    }
+
+    // For non-command messages, require mention or reply to bot
+    if (!isMentioned && !isReplyToBot) {
+      return;
     }
 
     // Rate limiting check
