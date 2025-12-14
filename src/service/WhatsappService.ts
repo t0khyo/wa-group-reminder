@@ -510,14 +510,18 @@ export class WhatsappService {
   private async handleHelpCommand(context: MessageContext): Promise<void> {
     const message = `*GiGi Commands*
 
-📝 *Commands:*
+*Task Commands:*
 • \`/tasks\` - Your active tasks
 • \`/all-tasks\` - All group tasks
-• \`/reminders\` - Your active reminders
-• \`/all-reminders\` - All group reminders
-• \`/recent-tasks\` - Recently closed
-• \`/task-digest\` - Manual digest
-• \`/ping\` - Test bot
+• \`/recent-tasks\` - Recently closed tasks
+• \`/task-digest\` - Manual task digest
+
+*Reminder Commands:*
+• \`/reminders\` or \`/meetings\` - Your active reminders
+• \`/all-reminders\` or \`/all-meetings\` - All group reminders
+
+*Other:*
+• \`/help\` - Show this message
 
 💬 *Chat naturally by mentioning me to:*
 • Create tasks & reminders
