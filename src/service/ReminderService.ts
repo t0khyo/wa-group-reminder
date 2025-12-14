@@ -343,6 +343,40 @@ export class ReminderService {
   }
 
   /**
+   * Get recently completed reminders (last 7 days)
+   */
+  async getRecentCompletedReminders(
+    chatId: string,
+    days: number = 7
+  ): Promise<ReminderDto[]> {
+    try {
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - days);
+
+      const reminders = await prisma.reminder.findMany({
+        where: {
+          chatId,
+          reminderSent: true,
+          updatedAt: {
+            gte: cutoffDate,
+          },
+        },
+        orderBy: {
+          updatedAt: "desc",
+        },
+      });
+
+      return reminders.map((r) => this.toReminderDto(r));
+    } catch (error) {
+      logger.error(
+        `Error getting recent completed reminders for chat ${chatId}:`,
+        error
+      );
+      throw new Error("Failed to get recent completed reminders");
+    }
+  }
+
+  /**
    * Clean up old completed reminders using Prisma
    */
   async cleanupOldReminders(olderThanDays: number = 30): Promise<number> {

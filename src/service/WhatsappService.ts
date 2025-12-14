@@ -414,6 +414,15 @@ export class WhatsappService {
           await this.handleRecentTasksCommand(context);
           return true;
 
+        case "/recent-reminders":
+        case "/recent-reminder":
+        case "/recent-meetings":
+        case "/recent-meeting":
+        case "/recent-r":
+        case "/recent-m":
+          await this.handleRecentRemindersCommand(context);
+          return true;
+
         case "/task-digest":
         case "/digest":
         case "/d":
@@ -442,6 +451,9 @@ export class WhatsappService {
             return true;
           case "recent-tasks":
             await this.handleRecentTasksCommand(context);
+            return true;
+          case "recent-reminders":
+            await this.handleRecentRemindersCommand(context);
             return true;
           case "task-digest":
             await this.handleTaskDigestCommand(context);
@@ -557,7 +569,7 @@ export class WhatsappService {
       await this.sendMessage(context.chatId, {
         text: `> @${this.cleanJidForDisplay(
           context.senderId
-        )}\n\n📅 You have no active reminders.`,
+        )}\n\nYou have no active reminders.`,
         mentions: [context.senderId],
       });
       return;
@@ -628,12 +640,12 @@ export class WhatsappService {
 
     if (activeReminders.length === 0) {
       await this.sendMessage(context.chatId, {
-        text: "📅 No active reminders scheduled.",
+        text: "No active reminders scheduled.",
       });
       return;
     }
 
-    let message = `📅 *Active Reminders* (${activeReminders.length})\n\n`;
+    let message = `*Active Reminders* (${activeReminders.length})\n\n`;
 
     for (const reminder of activeReminders) {
       const reminderNumber = reminderService.formatReminderId(
@@ -698,9 +710,9 @@ export class WhatsappService {
 
     const activeTasks = [...pendingTasks, ...inProgressTasks];
 
-    let message = `📋 *All Active Tasks*\n\n`;
-    message += `📊 *Statistics:*\n`;
-    message += `• Total: ${stats.total}\n`;
+    let message = `*All Active Tasks*\n\n`;
+    message += `*Statistics:*\n`;
+    message += `Total: ${stats.total}\n`;
     message += `🟡 Pending: ${stats.pending}\n`;
     message += `🟠 In Progress: ${stats.inProgress}\n`;
     message += `🟢 Done: ${stats.done}\n`;
@@ -832,12 +844,12 @@ export class WhatsappService {
 
     if (recentTasks.length === 0) {
       await this.sendMessage(context.chatId, {
-        text: "📋 No tasks completed or cancelled in the last 7 days.",
+        text: "No tasks completed or cancelled in the last 7 days.",
       });
       return;
     }
 
-    let message = `📋 *Recently Closed Tasks* (Last 7 days)\n\n`;
+    let message = `*Recently Closed Tasks* (Last 7 days)\n\n`;
 
     const completed = recentTasks.filter((t) => t.status === TaskStatus.Done);
     const cancelled = recentTasks.filter(
@@ -858,7 +870,7 @@ export class WhatsappService {
     }
 
     if (cancelled.length > 0) {
-      message += `❌ *Cancelled (${cancelled.length}):*\n`;
+      message += `*Cancelled (${cancelled.length}):*\n`;
       for (const task of cancelled) {
         const taskNumber = taskService.formatTaskId(task.taskId);
         const assignee =
