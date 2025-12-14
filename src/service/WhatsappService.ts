@@ -412,6 +412,7 @@ export class WhatsappService {
         case "/meeting":
         case "/my-reminders":
         case "/my-meetings":
+        case "/m":
           await this.handleMyRemindersCommand(context);
           return true;
 
@@ -422,6 +423,7 @@ export class WhatsappService {
         case "/all-meetings":
         case "/all-meeting":
         case "/all-m":
+        case "/allm":
           await this.handleAllRemindersCommand(context);
           return true;
 
