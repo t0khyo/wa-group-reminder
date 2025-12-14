@@ -213,9 +213,6 @@ wa-group-reminder/
 ## 🚀 Development
 
 ```bash
-# Watch mode for development
-npm run dev
-
 # Build TypeScript
 npm run build
 
