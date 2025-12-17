@@ -717,8 +717,7 @@ export class ReminderScheduler {
       const today = DateTime.now().setZone("Asia/Kuwait");
       const formattedDate = today.toFormat("EEEE, d'th' MMM");
 
-      let message = `📅 *Good morning!*\n\n`;
-      message += `Here are your reminders for *${formattedDate}*:\n\n`;
+      let message = `Here are your reminders for *${formattedDate}*:\n\n`;
 
       // Collect all mentions from all reminders
       const allMentions: string[] = [];
