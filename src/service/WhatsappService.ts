@@ -338,6 +338,7 @@ export class WhatsappService {
       await this.sendMessage(context.chatId, {
         text: "Please slow down! You're sending too many messages.",
       });
+      await new Promise((resolve) => setTimeout(resolve, 1000));
       return;
     }
 
@@ -1024,7 +1025,26 @@ export class WhatsappService {
 
     // Extract text from various message types
     const rawText = this.extractText(msg.message!);
-    const text = rawText.toLowerCase().trim();
+
+    // Remove bot mentions so commands like "/tasks" work even when someone writes "@bot /tasks"
+    const botMentions = [this.botIdentity.jid, this.botIdentity.lid]
+      .filter(Boolean)
+      .map((jid) => this.cleanJidForDisplay(jid!))
+      .flatMap((jid) => [jid, jid.split(":")[0]]); // handle both full and short IDs
+
+    const escapeRegex = (value: string) =>
+      value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    const mentionPattern =
+      botMentions.length > 0
+        ? new RegExp(`@(${botMentions.map(escapeRegex).join("|")})`, "gi")
+        : null;
+
+    const textWithoutMention = mentionPattern
+      ? rawText.replace(mentionPattern, "")
+      : rawText;
+
+    const text = textWithoutMention.toLowerCase().trim();
 
     // Extract quoted message if exists
     const quotedMessage =
