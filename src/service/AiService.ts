@@ -42,6 +42,7 @@ You are Gigi a WhatsApp assistant who helps manage reminders and tasks naturally
 * If no mention or assignment specified assign to the sender by default
 * Task IDs are formatted as "T1", "T2" etc.
 * If the user gives a direct task or command with no missing information, execute it immediately without asking for confirmation or suggestions.
+* When a message contains multiple users with tasks organized under each user (e.g., "@User1 Tasks: task1, task2" followed by "@User2 Tasks: task3"), use create_bulk_tasks function instead of creating tasks one by one.
 
 ## Examples:
 
@@ -78,6 +79,29 @@ Task *T1* is now complete 🟢"
 Gigi: "Done! ✅
 
 * *T4* - Update gigi to do something"
+
+6. User: "Please @Gigi add these tasks
+
+@User1 Tasks:
+- Task 1
+- Task 2
+
+@User2 Tasks:
+- Task 3
+- Task 4"
+Gigi: "Done! ✅
+
+Created *4* tasks
+
+> @User1
+* *T5* - Task 1
+* *T6* - Task 2
+
+> @User2
+* *T7* - Task 3
+* *T8* - Task 4"
+
+Note: For bulk task messages with multiple users, use create_bulk_tasks function. The user_mention_index is 0-based: first mentioned user (excluding bot) is 0, second is 1, etc.
 
 # Reminders
 
@@ -187,6 +211,13 @@ interface UpdateTaskParams {
 
 interface DeleteTaskParams {
   task_number: number; // Use the task number (1, 2, 3) instead of UUID
+}
+
+interface CreateBulkTasksParams {
+  tasks_by_user: Array<{
+    user_mention_index: number; // Index in the mentionedJids array (0-based)
+    tasks: string[]; // Array of task titles for this user
+  }>;
 }
 
 // Define available functions/tools for the AI (Responses API format)
@@ -357,6 +388,53 @@ const availableFunctions: any[] = [
       additionalProperties: false,
     },
   },
+  {
+    type: "function",
+    name: "create_bulk_tasks",
+    description:
+      "Create multiple tasks for multiple users at once. Use this when a message contains tasks organized by user mentions (e.g., '@User1 Tasks: task1, task2' followed by '@User2 Tasks: task3, task4'). " +
+      "The user_mention_index refers to the position of the user in the mentionedJids array (0-based, excluding bot mentions). " +
+      "For example, if the message mentions @Bot, @User1, @User2, then User1 is index 0 and User2 is index 1. " +
+      "Extract all tasks for each mentioned user and create them in bulk. Remove emoji status indicators (🟡, 🟠, 🟢, 🔴) from task titles.",
+    parameters: {
+      type: "object",
+      properties: {
+        tasks_by_user: {
+          type: "array",
+          description:
+            "Array of objects, each containing a user's mention index and their tasks. " +
+            "Each object represents one user and all their tasks from the message.",
+          items: {
+            type: "object",
+            properties: {
+              user_mention_index: {
+                type: "number",
+                description:
+                  "The index of the user in the mentionedJids array (0-based, bot mentions excluded). " +
+                  "Count mentions in order: first mentioned user (excluding bot) = 0, second = 1, third = 2, etc. " +
+                  "If a user appears multiple times in the message, use the index of their first appearance.",
+              },
+              tasks: {
+                type: "array",
+                description:
+                  "Array of task titles/descriptions for this user. " +
+                  "Extract tasks from lines that appear under this user's section (after their mention and before the next user's mention or end of message). " +
+                  "Remove emoji status indicators (🟡, 🟠, 🟢, 🔴) and bullet points (*, -, •) from task titles. " +
+                  "Clean up extra whitespace and keep only the task description.",
+                items: {
+                  type: "string",
+                },
+              },
+            },
+            required: ["user_mention_index", "tasks"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["tasks_by_user"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 export class AiService {
@@ -364,6 +442,7 @@ export class AiService {
   private previousResponseIds: Map<string, string> = new Map();
   private senderIds: Map<string, string> = new Map(); // chatId -> senderId mapping
   private mentionedJids: Map<string, string[]> = new Map(); // chatId -> mentioned JIDs
+  private rawTexts: Map<string, string> = new Map(); // chatId -> rawText for parsing
   private functionHandlers: Map<
     string,
     (args: any, chatId: string) => Promise<string>
@@ -403,6 +482,10 @@ export class AiService {
     this.functionHandlers.set("list_tasks", this.handleListTasks.bind(this));
     this.functionHandlers.set("update_task", this.handleUpdateTask.bind(this));
     this.functionHandlers.set("delete_task", this.handleDeleteTask.bind(this));
+    this.functionHandlers.set(
+      "create_bulk_tasks",
+      this.handleCreateBulkTasks.bind(this)
+    );
   }
 
   /**
@@ -798,9 +881,6 @@ export class AiService {
   /**
    * Handler for deleting a task
    */
-  /**
-   * Handler for deleting a task
-   */
   private async handleDeleteTask(
     args: DeleteTaskParams,
     chatId: string
@@ -844,6 +924,141 @@ export class AiService {
   }
 
   /**
+   * Handler for creating bulk tasks for multiple users
+   */
+  private async handleCreateBulkTasks(
+    args: CreateBulkTasksParams,
+    chatId: string
+  ): Promise<string> {
+    try {
+      logger.info(`Creating bulk tasks in chat ${chatId}:`, args);
+
+      const mentionedJids = this.mentionedJids.get(chatId) || [];
+      const senderId = this.senderIds.get(chatId);
+      const createdTasks: Array<{
+        task_number: string;
+        title: string;
+        assigned_to: string[];
+      }> = [];
+      const errors: string[] = [];
+
+      // Process each user's tasks
+      for (const userTasks of args.tasks_by_user) {
+        const { user_mention_index, tasks } = userTasks;
+
+        // Validate mention index
+        if (
+          user_mention_index < 0 ||
+          user_mention_index >= mentionedJids.length
+        ) {
+          errors.push(
+            `Invalid mention index ${user_mention_index} (available: 0-${mentionedJids.length - 1})`
+          );
+          continue;
+        }
+
+        const assignedToJid = mentionedJids[user_mention_index];
+
+        // Create each task for this user
+        for (const taskTitle of tasks) {
+          if (!taskTitle || taskTitle.trim().length === 0) {
+            continue; // Skip empty tasks
+          }
+
+          // Clean task title: remove emoji status indicators and bullet points
+          let cleanedTitle = taskTitle.trim();
+          // Remove emoji status indicators
+          cleanedTitle = cleanedTitle.replace(/[🟡🟠🟢🔴]/g, "").trim();
+          // Remove bullet points at the start
+          cleanedTitle = cleanedTitle.replace(/^[\*\-\•\⁠]+/, "").trim();
+          // Remove extra whitespace
+          cleanedTitle = cleanedTitle.replace(/\s+/g, " ").trim();
+
+          if (cleanedTitle.length === 0) {
+            continue; // Skip if nothing left after cleaning
+          }
+
+          try {
+            const task = await taskService.createTask({
+              chatId,
+              senderId: senderId || undefined,
+              title: cleanedTitle,
+              assignedTo: [assignedToJid],
+            });
+
+            const taskNumber = taskService.formatTaskId(task.taskId);
+            createdTasks.push({
+              task_number: taskNumber,
+              title: task.title,
+              assigned_to: [assignedToJid],
+            });
+          } catch (error: any) {
+            logger.error(
+              `Error creating task "${taskTitle}" for user ${assignedToJid}:`,
+              error
+            );
+            errors.push(
+              `Failed to create task "${taskTitle}": ${error.message}`
+            );
+          }
+        }
+      }
+
+      // Build response
+      const totalCreated = createdTasks.length;
+      const totalErrors = errors.length;
+
+      let message = `Done! ✅\n\nCreated *${totalCreated}* task${totalCreated !== 1 ? "s" : ""}`;
+      if (totalErrors > 0) {
+        message += ` (${totalErrors} error${totalErrors !== 1 ? "s" : ""})`;
+      }
+
+      // Group tasks by assignee for display and collect all mentioned JIDs
+      const tasksByAssignee = new Map<string, typeof createdTasks>();
+      const allMentionedJids = new Set<string>();
+      
+      for (const task of createdTasks) {
+        const assignee = task.assigned_to[0];
+        allMentionedJids.add(assignee);
+        if (!tasksByAssignee.has(assignee)) {
+          tasksByAssignee.set(assignee, []);
+        }
+        tasksByAssignee.get(assignee)!.push(task);
+      }
+
+      // Format response with tasks grouped by user
+      for (const [assignee, assigneeTasks] of tasksByAssignee.entries()) {
+        message += `\n\n> @${assignee}`;
+        for (const task of assigneeTasks) {
+          message += `\n* *${task.task_number}* - ${task.title}`;
+        }
+      }
+
+      if (errors.length > 0) {
+        message += `\n\n*Errors:*\n${errors.join("\n")}`;
+      }
+
+      return JSON.stringify({
+        success: totalCreated > 0,
+        total_created: totalCreated,
+        total_errors: totalErrors,
+        message,
+        details: {
+          tasks: createdTasks,
+          assigned_to: Array.from(allMentionedJids), // All unique JIDs that received tasks
+          errors: errors.length > 0 ? errors : undefined,
+        },
+      });
+    } catch (error: any) {
+      logger.error("Error creating bulk tasks:", error);
+      return JSON.stringify({
+        success: false,
+        error: "Failed to create bulk tasks: " + error.message,
+      });
+    }
+  }
+
+  /**
    * Generate a reply with conversation memory and function calling support
    * @param text - User's message
    * @param userId - Unique identifier for the user/chat (e.g., chatId or userId)
@@ -855,7 +1070,8 @@ export class AiService {
     text: string,
     userId: string,
     senderId?: string,
-    mentionedJids?: string[]
+    mentionedJids?: string[],
+    rawText?: string
   ): Promise<{ text: string; mentions?: string[] }> {
     text = this.cleanTextMessage(text);
     logger.info(`AI processing text from user ${userId}: "${text}"`);
@@ -868,6 +1084,11 @@ export class AiService {
     // Store mentioned JIDs if provided (excluding the bot itself)
     if (mentionedJids && mentionedJids.length > 0) {
       this.mentionedJids.set(userId, mentionedJids);
+    }
+
+    // Store raw text if provided (for parsing mentions in bulk tasks)
+    if (rawText) {
+      this.rawTexts.set(userId, rawText);
     }
 
     try {
@@ -918,7 +1139,7 @@ export class AiService {
           try {
             const responseData = JSON.parse(functionResponse);
             if (responseData.success) {
-              // Extract mentions from task assignments in details
+              // Extract mentions from task assignments in details (works for both single and bulk tasks)
               if (responseData.details?.assigned_to && Array.isArray(responseData.details.assigned_to)) {
                 responseData.details.assigned_to.forEach((jid: string) => {
                   if (jid) {

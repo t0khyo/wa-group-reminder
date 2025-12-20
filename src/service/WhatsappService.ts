@@ -351,7 +351,8 @@ export class WhatsappService {
         context.text,
         context.chatId,
         context.senderId,
-        context.mentionedJids
+        context.mentionedJids,
+        context.rawText
       );
 
       // Send reply with mentions if provided
