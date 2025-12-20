@@ -354,12 +354,16 @@ export class WhatsappService {
         context.mentionedJids
       );
 
-      // Send reply
-      await this.sendMessage(context.chatId, { text: reply });
+      // Send reply with mentions if provided
+      await this.sendMessage(context.chatId, {
+        text: reply.text,
+        mentions: reply.mentions,
+      });
 
       logger.debug("AI reply sent", {
         chatId: context.chatId,
         senderId: context.senderId,
+        hasMentions: !!reply.mentions && reply.mentions.length > 0,
       });
     } catch (error) {
       logger.error("Failed to generate AI reply", {

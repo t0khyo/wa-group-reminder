@@ -6,6 +6,7 @@ import dotenv from "dotenv";
 import { parseDateTime } from "../utils/DateParser.js";
 import { TaskStatus } from "../generated/prisma/client.js";
 import { cleanMessage } from "@whiskeysockets/baileys";
+import test from "node:test";
 dotenv.config();
 
 const AI_MODEL = process.env.AI_MODEL || "gpt-5-nano";
@@ -438,6 +439,7 @@ export class AiService {
           reminder_number: reminder.reminderNumber,
           message: args.message,
           scheduled_time: reminder.scheduledTimeLocal,
+          mentions: contextMentions,
         },
       });
     } catch (error: any) {
@@ -847,14 +849,14 @@ export class AiService {
    * @param userId - Unique identifier for the user/chat (e.g., chatId or userId)
    * @param senderId - Optional sender ID to track who created the reminder
    * @param mentionedJids - Optional array of mentioned user JIDs from the message
-   * @returns AI-generated reply
+   * @returns AI-generated reply with optional mentions
    */
   public async generateReply(
     text: string,
     userId: string,
     senderId?: string,
     mentionedJids?: string[]
-  ): Promise<string> {
+  ): Promise<{ text: string; mentions?: string[] }> {
     text = this.cleanTextMessage(text);
     logger.info(`AI processing text from user ${userId}: "${text}"`);
 
@@ -885,6 +887,7 @@ export class AiService {
       // Process the response output for function calls
       let needsFollowUp = false;
       const functionOutputs: any[] = [];
+      const collectedMentions: Set<string> = new Set();
 
       for (const item of response.output) {
         // Handle function calls
@@ -909,6 +912,59 @@ export class AiService {
               success: false,
               error: `Unknown function: ${functionName}`,
             });
+          }
+
+          // Extract mentions from function response
+          try {
+            const responseData = JSON.parse(functionResponse);
+            if (responseData.success) {
+              // Extract mentions from task assignments in details
+              if (responseData.details?.assigned_to && Array.isArray(responseData.details.assigned_to)) {
+                responseData.details.assigned_to.forEach((jid: string) => {
+                  if (jid) {
+                    collectedMentions.add(jid);
+                    logger.debug(`Collected mention from task assignment: ${jid}`);
+                  }
+                });
+              }
+              // Extract mentions from reminder mentions in details
+              if (responseData.details?.mentions && Array.isArray(responseData.details.mentions)) {
+                responseData.details.mentions.forEach((jid: string) => {
+                  if (jid) {
+                    collectedMentions.add(jid);
+                    logger.debug(`Collected mention from reminder: ${jid}`);
+                  }
+                });
+              }
+              // For list operations, collect mentions from all items
+              if (responseData.tasks && Array.isArray(responseData.tasks)) {
+                responseData.tasks.forEach((task: any) => {
+                  if (task.assigned_to && Array.isArray(task.assigned_to)) {
+                    task.assigned_to.forEach((jid: string) => {
+                      if (jid) {
+                        collectedMentions.add(jid);
+                        logger.debug(`Collected mention from task list: ${jid}`);
+                      }
+                    });
+                  }
+                });
+              }
+              if (responseData.reminders && Array.isArray(responseData.reminders)) {
+                responseData.reminders.forEach((reminder: any) => {
+                  if (reminder.mentions && Array.isArray(reminder.mentions)) {
+                    reminder.mentions.forEach((jid: string) => {
+                      if (jid) {
+                        collectedMentions.add(jid);
+                        logger.debug(`Collected mention from reminder list: ${jid}`);
+                      }
+                    });
+                  }
+                });
+              }
+            }
+          } catch (e) {
+            // If parsing fails, continue without extracting mentions
+            logger.debug("Could not parse function response for mentions", e);
           }
 
           // Store function output for follow-up request
@@ -941,11 +997,22 @@ export class AiService {
       const reply =
         response.output_text || "Sorry, I couldn't generate a reply.";
 
-      return reply;
+      // Convert collected mentions to array
+      const mentions = collectedMentions.size > 0 
+        ? Array.from(collectedMentions) 
+        : undefined;
+
+      if (mentions && mentions.length > 0) {
+        logger.info(`Including ${mentions.length} mention(s) in AI response: ${mentions.join(", ")}`);
+      }
+
+      text.replace('@lid:', '');
+
+      return { text: reply, mentions };
     } catch (err: any) {
       logger.error("AI Error: " + (err?.message || err));
       logger.error("Full error:", err);
-      return "Sorry, I couldn't process that right now.";
+      return { text: "Sorry, I couldn't process that right now." };
     }
   }
 
