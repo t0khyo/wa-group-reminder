@@ -5,8 +5,6 @@ import { taskService } from "./TaskService.js";
 import dotenv from "dotenv";
 import { parseDateTime } from "../utils/DateParser.js";
 import { TaskStatus } from "../generated/prisma/client.js";
-import { cleanMessage } from "@whiskeysockets/baileys";
-import test from "node:test";
 dotenv.config();
 
 const AI_MODEL = process.env.AI_MODEL || "gpt-5-nano";
@@ -31,7 +29,7 @@ You are Gigi a WhatsApp assistant who helps manage reminders and tasks naturally
 * Tasks emojis: 🟡 (pending), 🟠 (in progress), 🟢 (done), 🔴 (cancelled)
 * Use these emojis for actions: Success ✅, Delete 🗑️, Fail ❌
 * For errors be helpful and suggest what to do next
-* If a user asks to translate a message, phrase, or word into another language (e.g., Arabic), provide the translation directly.
+* If a user asks to translate a message, phrase, or word into another language (e.g., Arabic(Egypt accent)), provide the translation directly.
 
 # Tasks
 
@@ -39,7 +37,7 @@ You are Gigi a WhatsApp assistant who helps manage reminders and tasks naturally
 * Tasks can be assigned to ONLY ONE person.
 * If user says "assign to me" or "my task" or "for me" then assign to the sender (set assign_to_sender: true)
 * If user mentions someone (e.g., "@John review proposal") assign to mentioned person (set use_first_mention: true)
-* If no mention or assignment specified assign to the sender by default
+* If no mention or assignment specified assign to the sender by default and mention him in the response message
 * Task IDs are formatted as "T1", "T2" etc.
 * If the user gives a direct task or command with no missing information, execute it immediately without asking for confirmation or suggestions.
 * When a message contains multiple users with tasks organized under each user (e.g., "@User1 Tasks: task1, task2" followed by "@User2 Tasks: task3"), use create_bulk_tasks function instead of creating tasks one by one.
@@ -48,7 +46,7 @@ You are Gigi a WhatsApp assistant who helps manage reminders and tasks naturally
 
 1. User: "Assign to me: follow up with client"
 Gigi: "Done! ✅
-@[sender]
+@assignedTo@lid
 * *T1* Follow up with client"
 
 2. User: "@John finish the presentation"
@@ -952,7 +950,9 @@ export class AiService {
           user_mention_index >= mentionedJids.length
         ) {
           errors.push(
-            `Invalid mention index ${user_mention_index} (available: 0-${mentionedJids.length - 1})`
+            `Invalid mention index ${user_mention_index} (available: 0-${
+              mentionedJids.length - 1
+            })`
           );
           continue;
         }
@@ -1008,7 +1008,9 @@ export class AiService {
       const totalCreated = createdTasks.length;
       const totalErrors = errors.length;
 
-      let message = `Done! ✅\n\nCreated *${totalCreated}* task${totalCreated !== 1 ? "s" : ""}`;
+      let message = `Done! ✅\n\nCreated *${totalCreated}* task${
+        totalCreated !== 1 ? "s" : ""
+      }`;
       if (totalErrors > 0) {
         message += ` (${totalErrors} error${totalErrors !== 1 ? "s" : ""})`;
       }
@@ -1016,7 +1018,7 @@ export class AiService {
       // Group tasks by assignee for display and collect all mentioned JIDs
       const tasksByAssignee = new Map<string, typeof createdTasks>();
       const allMentionedJids = new Set<string>();
-      
+
       for (const task of createdTasks) {
         const assignee = task.assigned_to[0];
         allMentionedJids.add(assignee);
@@ -1140,16 +1142,24 @@ export class AiService {
             const responseData = JSON.parse(functionResponse);
             if (responseData.success) {
               // Extract mentions from task assignments in details (works for both single and bulk tasks)
-              if (responseData.details?.assigned_to && Array.isArray(responseData.details.assigned_to)) {
+              if (
+                responseData.details?.assigned_to &&
+                Array.isArray(responseData.details.assigned_to)
+              ) {
                 responseData.details.assigned_to.forEach((jid: string) => {
                   if (jid) {
                     collectedMentions.add(jid);
-                    logger.debug(`Collected mention from task assignment: ${jid}`);
+                    logger.debug(
+                      `Collected mention from task assignment: ${jid}`
+                    );
                   }
                 });
               }
               // Extract mentions from reminder mentions in details
-              if (responseData.details?.mentions && Array.isArray(responseData.details.mentions)) {
+              if (
+                responseData.details?.mentions &&
+                Array.isArray(responseData.details.mentions)
+              ) {
                 responseData.details.mentions.forEach((jid: string) => {
                   if (jid) {
                     collectedMentions.add(jid);
@@ -1164,19 +1174,26 @@ export class AiService {
                     task.assigned_to.forEach((jid: string) => {
                       if (jid) {
                         collectedMentions.add(jid);
-                        logger.debug(`Collected mention from task list: ${jid}`);
+                        logger.debug(
+                          `Collected mention from task list: ${jid}`
+                        );
                       }
                     });
                   }
                 });
               }
-              if (responseData.reminders && Array.isArray(responseData.reminders)) {
+              if (
+                responseData.reminders &&
+                Array.isArray(responseData.reminders)
+              ) {
                 responseData.reminders.forEach((reminder: any) => {
                   if (reminder.mentions && Array.isArray(reminder.mentions)) {
                     reminder.mentions.forEach((jid: string) => {
                       if (jid) {
                         collectedMentions.add(jid);
-                        logger.debug(`Collected mention from reminder list: ${jid}`);
+                        logger.debug(
+                          `Collected mention from reminder list: ${jid}`
+                        );
                       }
                     });
                   }
@@ -1219,15 +1236,18 @@ export class AiService {
         response.output_text || "Sorry, I couldn't generate a reply.";
 
       // Convert collected mentions to array
-      const mentions = collectedMentions.size > 0 
-        ? Array.from(collectedMentions) 
-        : undefined;
+      const mentions =
+        collectedMentions.size > 0 ? Array.from(collectedMentions) : undefined;
 
       if (mentions && mentions.length > 0) {
-        logger.info(`Including ${mentions.length} mention(s) in AI response: ${mentions.join(", ")}`);
+        logger.info(
+          `Including ${
+            mentions.length
+          } mention(s) in AI response: ${mentions.join(", ")}`
+        );
       }
 
-      text.replace('@lid:', '');
+      text.replace("@lid", "");
 
       return { text: reply, mentions };
     } catch (err: any) {
