@@ -89,13 +89,13 @@ export class TaskScheduler {
   private scheduleEveningDigest(): void {
     try {
       // Schedule for 10:00 PM every day in Kuwait timezone
-      // Using cron: minute hour * * * (0 22 * * * = 10:00 PM every day)
-      this.eveningDigestJob = schedule.scheduleJob("0 22 * * *", async () => {
-        logger.info("Running evening task digest at 10:00 PM...");
+      // Using cron: minute hour * * * (0 21 * * * = 9:30 PM every day)
+      this.eveningDigestJob = schedule.scheduleJob("30 21 * * *", async () => {
+        logger.info("Running evening task digest at 9:30 PM...");
         await this.sendTaskDigest("evening");
       });
 
-      logger.info("📅 Evening task digest scheduled for 10:00 PM daily");
+      logger.info("📅 Evening task digest scheduled for 9:30 PM daily");
     } catch (error) {
       logger.error("Error scheduling evening digest:", error);
     }
@@ -163,6 +163,9 @@ export class TaskScheduler {
   /**
    * Send task digest for a specific chat
    */
+  /**
+   * Send task digest for a specific chat
+   */
   private async sendChatTaskDigest(
     chatId: string,
     period: "morning" | "evening"
@@ -178,10 +181,18 @@ export class TaskScheduler {
         chatId,
         TaskStatus.InProgress
       );
+      
+      // Get completed tasks from the last 3 days
+      const recentClosedTasks = await taskService.getRecentClosedTasks(chatId, 3);
+      const completedTasks = recentClosedTasks.filter(
+        (t) => t.status === TaskStatus.Done
+      );
 
-      // Only send if there are pending or in-progress tasks
-      if (pendingTasks.length === 0 && inProgressTasks.length === 0) {
-        logger.info(`No active tasks for chat ${chatId}, skipping digest`);
+      const activeTasks = [...pendingTasks, ...inProgressTasks];
+
+      // Only send if there are active tasks or recently completed tasks
+      if (activeTasks.length === 0 && completedTasks.length === 0) {
+        logger.info(`No active or recent tasks for chat ${chatId}, skipping digest`);
         return;
       }
 
@@ -190,7 +201,7 @@ export class TaskScheduler {
       const timeStr = now.toFormat("h:mm a");
       const dateStr = now.toFormat("EEEE, MMMM d, yyyy");
 
-      // Build message based on period
+      // Build statistics message
       let greeting = "";
       let emoji = "";
 
@@ -202,87 +213,83 @@ export class TaskScheduler {
         emoji = "📊";
       }
 
-      let message = `${greeting}\n\n`;
-      message += `${emoji} *Task Summary* - ${timeStr}\n`;
-      message += `_${dateStr}_\n\n`;
+      let statsMessage = `${greeting}\n\n`;
+      statsMessage += `${emoji} *Task Summary* - ${timeStr}\n`;
+      statsMessage += `_${dateStr}_\n\n`;
 
       // Task statistics
-      message += `📊 *Statistics:*\n`;
-      message += `• Total: ${stats.total}\n`;
-      message += `🟡 Pending: ${stats.pending}\n`;
-      message += `🟠 In Progress: ${stats.inProgress}\n`;
-      message += `🟢 Done: ${stats.done}\n`;
-      message += `🔴 Cancelled: ${stats.cancelled}\n\n`;
+      statsMessage += `📊 *Statistics:*\n`;
+      statsMessage += `• Total: ${stats.total}\n`;
+      statsMessage += `🟡 Pending: ${stats.pending}\n`;
+      statsMessage += `🟠 In Progress: ${stats.inProgress}\n`;
+      statsMessage += `🟢 Done: ${stats.done}\n`;
+      statsMessage += `🔴 Cancelled: ${stats.cancelled}\n\n`;
 
-      // Group active tasks by assignee
-      const activeTasks = [...pendingTasks, ...inProgressTasks];
-      const allMentions: string[] = [];
+      // Identify unassigned tasks (Active only)
+      const unassignedTasks = activeTasks.filter(
+        (t) => !t.assignedTo || t.assignedTo.length === 0
+      );
 
-      if (activeTasks.length > 0) {
-        message += `*Active Tasks (${activeTasks.length}):*\n\n`;
-
-        // Group tasks by assignee
-        const tasksByAssignee = new Map<string, typeof activeTasks>();
-        const unassignedTasks: typeof activeTasks = [];
-
-        for (const task of activeTasks) {
-          if (task.assignedTo && task.assignedTo.length > 0) {
-            // Task has assignees - add to each assignee's list
-            for (const assignee of task.assignedTo) {
-              const assigneeTasks = tasksByAssignee.get(assignee) || [];
-              assigneeTasks.push(task);
-              tasksByAssignee.set(assignee, assigneeTasks);
-
-              // Track for mentions array
-              if (!allMentions.includes(assignee)) {
-                allMentions.push(assignee);
-              }
-            }
-          } else {
-            // Unassigned task
-            unassignedTasks.push(task);
-          }
+      if (unassignedTasks.length > 0) {
+        statsMessage += `*Unassigned Tasks:*\n`;
+        for (const task of unassignedTasks) {
+          const emoji = taskService.getStatusEmoji(task.status);
+          const taskNumber = taskService.formatTaskId(task.taskId);
+          statsMessage += `* *${taskNumber}* - ${task.title} ${emoji}\n`;
         }
-
-        // Display tasks grouped by assignee
-        for (const [assignee, assigneeTasks] of tasksByAssignee.entries()) {
-          // Clean JID for display
-          const cleanAssignee = this.cleanJidForDisplay(assignee);
-          message += `> @${cleanAssignee}\n`;
-
-          for (const task of assigneeTasks) {
-            const emoji = taskService.getStatusEmoji(task.status);
-            const taskNumber = taskService.formatTaskId(task.taskId);
-            message += `* *${taskNumber}* - ${task.title} ${emoji}\n`;
-          }
-
-          message += `\n`;
-        }
-
-        // Display unassigned tasks if any
-        if (unassignedTasks.length > 0) {
-          message += `*Unassigned Tasks:*\n`;
-          for (const task of unassignedTasks) {
-            const emoji = taskService.getStatusEmoji(task.status);
-            const taskNumber = taskService.formatTaskId(task.taskId);
-            message += `* *${taskNumber}* - ${task.title} ${emoji}\n`;
-          }
-          message += `\n`;
-        }
+        statsMessage += `\n`;
       }
-
-      // Add motivational message based on period
+      
       if (period === "morning") {
-        message += `💪 Let's tackle these tasks today!`;
+         statsMessage += `💪 Let's tackle these tasks today!`;
       } else {
-        message += `✨ Great work today! Don't forget to wrap up pending tasks.`;
+         statsMessage += `✨ Great work today!`;
       }
 
-      // Send message with mentions
+      // Send Statistics Message
       await whatsappService.sendMessage(chatId, {
-        text: message,
-        mentions: allMentions,
+        text: statsMessage,
       });
+
+      // Group tasks by assignee (Active + Recently Completed)
+      const usersWithTasks = new Set<string>();
+      
+      activeTasks.forEach(t => t.assignedTo.forEach(u => usersWithTasks.add(u)));
+      completedTasks.forEach(t => t.assignedTo.forEach(u => usersWithTasks.add(u)));
+
+      // Send a separate message for each user
+      for (const userId of usersWithTasks) {
+        const cleanUser = this.cleanJidForDisplay(userId);
+        
+        // Combine active and completed tasks for this user
+        const userTasks = [
+          ...activeTasks.filter(t => t.assignedTo.includes(userId)),
+          ...completedTasks.filter(t => t.assignedTo.includes(userId))
+        ];
+
+        // Sort by task ID to keep them in order
+        userTasks.sort((a, b) => a.taskId - b.taskId);
+
+        if (userTasks.length === 0) continue;
+
+        let userMessage = `> @${cleanUser}\n\n`;
+        userMessage += `*Your Tasks:*\n`;
+
+        for (const task of userTasks) {
+           const emoji = taskService.getStatusEmoji(task.status);
+           const taskNumber = taskService.formatTaskId(task.taskId);
+           userMessage += `* *${taskNumber}* - ${task.title} ${emoji}\n`;
+        }
+
+        await whatsappService.sendMessage(chatId, {
+          text: userMessage,
+          mentions: [userId]
+        });
+        
+        // Small delay to prevent rate limit issues
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+
       logger.info(`Sent ${period} task digest to chat ${chatId}`);
     } catch (error) {
       logger.error(
