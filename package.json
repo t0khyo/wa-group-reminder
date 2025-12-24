@@ -2,11 +2,12 @@
   "name": "wa-group-reminder",
   "version": "1.0.0",
   "description": "WhatsApp bot that creates meeting reminders when mentioned in groups",
-  "main": "src/index.js",
+  "main": "src/app.ts",
   "type": "module",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "nodemon src/index.js"
+    "start": "node dist/app.js",
+    "build": "tsc",
+    "dev": "npx tsc --watch"
   },
   "keywords": [
     "whatsapp",
@@ -19,12 +20,42 @@
   "license": "MIT",
   "dependencies": {
     "@hapi/boom": "^10.0.1",
+    "@prisma/adapter-pg": "^7.0.1",
+    "@prisma/client": "^7.0.1",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "better-sqlite3": "^12.4.6",
     "chrono-node": "^2.9.0",
-    "qrcode-terminal": "^0.12.0"
+    "dotenv": "^17.2.3",
+    "luxon": "^3.7.2",
+    "node-cron": "^4.2.1",
+    "node-schedule": "^2.1.1",
+    "openai": "^6.9.1",
+    "pg": "^8.16.3",
+    "qrcode-terminal": "^0.12.0",
+    "winston": "^3.18.3",
+    "winston-daily-rotate-file": "^5.0.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.11"
-  }
+    "@types/luxon": "^3.7.1",
+    "@types/node": "^24.10.1",
+    "@types/node-schedule": "^2.1.8",
+    "@types/pg": "^8.15.6",
+    "@types/qrcode-terminal": "^0.12.2",
+    "@typescript-eslint/eslint-plugin": "^8.48.0",
+    "@typescript-eslint/parser": "^8.48.0",
+    "eslint": "^9.39.1",
+    "nodemon": "^3.1.11",
+    "prisma": "^7.0.1",
+    "ts-node-dev": "^2.0.0",
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "^5.9.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/t0khyo/wa-group-reminder.git"
+  },
+  "bugs": {
+    "url": "https://github.com/t0khyo/wa-group-reminder/issues"
+  },
+  "homepage": "https://github.com/t0khyo/wa-group-reminder#readme"
 }

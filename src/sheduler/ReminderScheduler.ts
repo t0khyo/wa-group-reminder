@@ -1,0 +1,809 @@
+import * as schedule from "node-schedule";
+import { prisma } from "../lib/prisma.js";
+import logger from "../utils/logger.js";
+import { DateTime, Zone } from "luxon";
+
+// We'll set the WhatsApp service instance after initialization
+let whatsappService: any = null;
+
+/**
+ * Set the WhatsApp service instance for sending messages
+ */
+export function setWhatsappService(service: any): void {
+  whatsappService = service;
+  logger.info("WhatsApp service connected", { scheduler: "ReminderScheduler" });
+}
+
+/**
+ * ReminderScheduler - Manages scheduled reminder notifications
+ * Sends reminders at three stages:
+ * 1. 24 hours before (reminder24hSent)
+ * 2. 1 hour before (reminder1hSent)
+ * 3. At the exact time (reminderSent)
+ */
+export class ReminderScheduler {
+  private jobs: Map<string, schedule.Job[]> = new Map();
+  private checkInterval: NodeJS.Timeout | null = null;
+  private dailyDigestJob: schedule.Job | null = null;
+
+  constructor() {
+    logger.debug("ReminderScheduler initialized");
+  }
+
+  /**
+   * Start the scheduler - checks every minute for upcoming reminders
+   */
+  async start(): Promise<void> {
+    logger.info("Starting ReminderScheduler");
+
+    // Load existing active reminders from database
+    await this.loadActiveReminders();
+
+    // Schedule daily digest at 8 AM
+    this.scheduleDailyDigest();
+
+    // Check every minute for reminders that need to be sent
+    this.checkInterval = setInterval(async () => {
+      await this.checkAndSendDueReminders();
+    }, 60000); // Every 60 seconds
+
+    logger.info("ReminderScheduler started successfully");
+  }
+
+  /**
+   * Stop the scheduler
+   */
+  stop(): void {
+    logger.info("Stopping ReminderScheduler");
+
+    if (this.checkInterval) {
+      clearInterval(this.checkInterval);
+      this.checkInterval = null;
+    }
+
+    // Cancel daily digest job
+    if (this.dailyDigestJob) {
+      this.dailyDigestJob.cancel();
+      this.dailyDigestJob = null;
+    }
+
+    // Cancel all scheduled jobs
+    for (const [reminderId, jobs] of this.jobs.entries()) {
+      jobs.forEach((job) => job.cancel());
+    }
+
+    logger.info("ReminderScheduler stopped", {
+      cancelledReminders: this.jobs.size,
+    });
+
+    this.jobs.clear();
+  }
+
+  /**
+   * Load all active reminders from database and schedule them
+   */
+  private async loadActiveReminders(): Promise<void> {
+    try {
+      const activeReminders = await prisma.reminder.findMany({
+        where: {
+          reminderSent: false,
+          remindAtUtc: {
+            gt: new Date(), // Only future reminders
+          },
+        },
+      });
+
+      logger.info("Active reminders loaded", { count: activeReminders.length });
+
+      for (const reminder of activeReminders) {
+        this.scheduleReminder(
+          reminder.id,
+          reminder.remindAtUtc,
+          reminder.reminder24hSent,
+          reminder.reminder1hSent,
+          reminder.reminder30mSent
+        );
+      }
+    } catch (error) {
+      logger.error("Failed to load active reminders", {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+    }
+  }
+
+  /**
+   * Schedule a reminder with all its notification stages
+   */
+  scheduleReminder(
+    reminderId: string,
+    remindAtUtc: Date,
+    reminder24hSent: boolean,
+    reminder1hSent: boolean,
+    reminder30mSent: boolean
+  ): void {
+    const jobs: schedule.Job[] = [];
+    const now = new Date();
+
+    // Schedule 24-hour advance reminder
+    if (!reminder24hSent) {
+      const twentyFourHoursBefore = new Date(
+        remindAtUtc.getTime() - 24 * 60 * 60 * 1000
+      );
+      if (twentyFourHoursBefore > now) {
+        const job = schedule.scheduleJob(twentyFourHoursBefore, async () => {
+          await this.send24HourReminder(reminderId);
+        });
+        jobs.push(job);
+        logger.debug("Scheduled 24h reminder", {
+          reminderId,
+          scheduledTime: twentyFourHoursBefore.toISOString(),
+        });
+      }
+    }
+
+    // Schedule 1-hour advance reminder
+    if (!reminder1hSent) {
+      const oneHourBefore = new Date(remindAtUtc.getTime() - 60 * 60 * 1000);
+      if (oneHourBefore > now) {
+        const job = schedule.scheduleJob(oneHourBefore, async () => {
+          await this.send1HourReminder(reminderId);
+        });
+        jobs.push(job);
+        logger.debug("Scheduled 1h reminder", {
+          reminderId,
+          scheduledTime: oneHourBefore.toISOString(),
+        });
+      }
+    }
+
+    // Schedule 30-minute advance reminder
+    if (!reminder30mSent) {
+      const thirtyMinutesBefore = new Date(
+        remindAtUtc.getTime() - 30 * 60 * 1000
+      );
+      if (thirtyMinutesBefore > now) {
+        const job = schedule.scheduleJob(thirtyMinutesBefore, async () => {
+          await this.send30MinuteReminder(reminderId);
+        });
+        jobs.push(job);
+        logger.debug("Scheduled 30m reminder", {
+          reminderId,
+          scheduledTime: thirtyMinutesBefore.toISOString(),
+        });
+      }
+    }
+
+    // Schedule exact time reminder
+    if (remindAtUtc > now) {
+      const job = schedule.scheduleJob(remindAtUtc, async () => {
+        await this.sendFinalReminder(reminderId);
+      });
+      jobs.push(job);
+      logger.debug("Scheduled final reminder", {
+        reminderId,
+        scheduledTime: remindAtUtc.toISOString(),
+      });
+    }
+
+    if (jobs.length > 0) {
+      this.jobs.set(reminderId, jobs);
+    }
+  }
+
+  /**
+   * Cancel all jobs for a specific reminder
+   */
+  cancelReminder(reminderId: string): void {
+    const jobs = this.jobs.get(reminderId);
+    if (jobs) {
+      jobs.forEach((job) => job.cancel());
+      this.jobs.delete(reminderId);
+      logger.debug("Cancelled reminder jobs", { reminderId });
+    }
+  }
+
+  /**
+   * Send 24-hour advance reminder
+   */
+  private async send24HourReminder(reminderId: string): Promise<void> {
+    try {
+      const reminder = await prisma.reminder.findUnique({
+        where: { id: reminderId },
+      });
+
+      if (!reminder || reminder.reminderSent) {
+        return;
+      }
+
+      logger.debug("Sending 24h advance reminder", { reminderId });
+
+      // Get local time components
+      const dt = DateTime.fromJSDate(reminder.remindAtUtc, {
+        zone: "utc",
+      }).setZone(reminder.timezone);
+
+      const date = dt.toFormat("d MMMM yyyy");
+      const day = dt.toFormat("EEEE");
+      const time = dt.toFormat("h:mm a");
+
+      // Send WhatsApp message
+      if (whatsappService) {
+        let message = `⏰ *Reminder in 24 hours!*\n\n`;
+        message += `*${reminder.title}*\n\n`;
+        message += `Date: ${date}\n`;
+        message += `Day: ${day}\n`;
+        message += `Time: ${time}`;
+
+        // Build mentions array (include existing mentions + sender)
+        const mentions = [...reminder.mentions];
+        if (reminder.senderId && !mentions.includes(reminder.senderId)) {
+          mentions.push(reminder.senderId);
+        }
+
+        // Add all mentions at the end
+        if (mentions.length > 0) {
+          const cleanMentions = mentions
+            .map((jid) => `> @${this.cleanJidForDisplay(jid)}`)
+            .join("\n");
+          message += `\n\n${cleanMentions}`;
+        }
+
+        try {
+          await whatsappService.sendMessage(reminder.chatId, {
+            text: message,
+            mentions: mentions,
+          });
+          logger.info("24h reminder sent", {
+            reminderId,
+            chatId: reminder.chatId,
+            mentionCount: mentions.length,
+          });
+        } catch (error) {
+          logger.error("Failed to send 24h WhatsApp message", {
+            error: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack : undefined,
+            reminderId,
+            chatId: reminder.chatId,
+          });
+        }
+      } else {
+        logger.warn("WhatsApp service not available for 24h reminder");
+      }
+
+      // Mark as sent
+      await prisma.reminder.update({
+        where: { id: reminderId },
+        data: { reminder24hSent: true },
+      });
+    } catch (error) {
+      logger.error("Error sending 24h reminder", {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        reminderId,
+      });
+    }
+  }
+
+  /**
+   * Send 1-hour advance reminder
+   */
+  private async send1HourReminder(reminderId: string): Promise<void> {
+    try {
+      const reminder = await prisma.reminder.findUnique({
+        where: { id: reminderId },
+      });
+
+      if (!reminder || reminder.reminderSent) {
+        return;
+      }
+
+      logger.debug("Sending 1h advance reminder", { reminderId });
+
+      // Get local time components
+      const dt = DateTime.fromJSDate(reminder.remindAtUtc, {
+        zone: "utc",
+      }).setZone(reminder.timezone);
+
+      const date = dt.toFormat("d MMMM yyyy");
+      const day = dt.toFormat("EEEE");
+      const time = dt.toFormat("h:mm a");
+
+      // Send WhatsApp message
+      if (whatsappService) {
+        let message = `⏰ *Reminder in 1 hour!*\n\n`;
+        message += `*${reminder.title}*\n\n`;
+        message += `Date: ${date}\n`;
+        message += `Day: ${day}\n`;
+        message += `Time: ${time}`;
+
+        // Build mentions array (include existing mentions + sender)
+        const mentions = [...reminder.mentions];
+        if (reminder.senderId && !mentions.includes(reminder.senderId)) {
+          mentions.push(reminder.senderId);
+        }
+
+        // Add all mentions at the end
+        if (mentions.length > 0) {
+          const cleanMentions = mentions
+            .map((jid) => `> @${this.cleanJidForDisplay(jid)}`)
+            .join("\n");
+          message += `\n\n${cleanMentions}`;
+        }
+
+        try {
+          await whatsappService.sendMessage(reminder.chatId, {
+            text: message,
+            mentions: mentions,
+          });
+          logger.info("1h reminder sent", {
+            reminderId,
+            chatId: reminder.chatId,
+            mentionCount: mentions.length,
+          });
+        } catch (error) {
+          logger.error("Failed to send 1h WhatsApp message", {
+            error: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack : undefined,
+            reminderId,
+            chatId: reminder.chatId,
+          });
+        }
+      } else {
+        logger.warn("WhatsApp service not available for 1h reminder");
+      }
+
+      // Mark as sent
+      await prisma.reminder.update({
+        where: { id: reminderId },
+        data: { reminder1hSent: true },
+      });
+    } catch (error) {
+      logger.error("Error sending 1h reminder", {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        reminderId,
+      });
+    }
+  }
+
+  /**
+   * Send 30-minute advance reminder
+   */
+  private async send30MinuteReminder(reminderId: string): Promise<void> {
+    try {
+      const reminder = await prisma.reminder.findUnique({
+        where: { id: reminderId },
+      });
+
+      if (!reminder || reminder.reminderSent) {
+        return;
+      }
+
+      logger.debug("Sending 30m advance reminder", { reminderId });
+
+      // Get local time components
+      const dt = DateTime.fromJSDate(reminder.remindAtUtc, {
+        zone: "utc",
+      }).setZone(reminder.timezone);
+
+      const date = dt.toFormat("d MMMM yyyy");
+      const day = dt.toFormat("EEEE");
+      const time = dt.toFormat("h:mm a");
+
+      // Send WhatsApp message
+      if (whatsappService) {
+        let message = `⏰ *Reminder in 30 minutes!*\n\n`;
+        message += `*${reminder.title}*\n\n`;
+        message += `Date: ${date}\n`;
+        message += `Day: ${day}\n`;
+        message += `Time: ${time}`;
+
+        // Build mentions array (include existing mentions + sender)
+        const mentions = [...reminder.mentions];
+        if (reminder.senderId && !mentions.includes(reminder.senderId)) {
+          mentions.push(reminder.senderId);
+        }
+
+        // Add all mentions at the end
+        if (mentions.length > 0) {
+          const cleanMentions = mentions
+            .map((jid) => `> @${this.cleanJidForDisplay(jid)}`)
+            .join("\n");
+          message += `\n\n${cleanMentions}`;
+        }
+
+        try {
+          await whatsappService.sendMessage(reminder.chatId, {
+            text: message,
+            mentions: mentions,
+          });
+          logger.info("30m reminder sent", {
+            reminderId,
+            chatId: reminder.chatId,
+            mentionCount: mentions.length,
+          });
+        } catch (error) {
+          logger.error("Failed to send 30m WhatsApp message", {
+            error: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack : undefined,
+            reminderId,
+            chatId: reminder.chatId,
+          });
+        }
+      } else {
+        logger.warn("WhatsApp service not available for 30m reminder");
+      }
+
+      // Mark as sent
+      await prisma.reminder.update({
+        where: { id: reminderId },
+        data: { reminder30mSent: true },
+      });
+    } catch (error) {
+      logger.error("Error sending 30m reminder", {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        reminderId,
+      });
+    }
+  }
+
+  /**
+   * Send final reminder at exact time
+   */
+  private async sendFinalReminder(reminderId: string): Promise<void> {
+    try {
+      const reminder = await prisma.reminder.findUnique({
+        where: { id: reminderId },
+      });
+
+      if (!reminder || reminder.reminderSent) {
+        return;
+      }
+
+      logger.debug("Sending final reminder", { reminderId });
+
+      // Get local time components
+      const dt = DateTime.fromJSDate(reminder.remindAtUtc, {
+        zone: "utc",
+      }).setZone(reminder.timezone);
+
+      const date = dt.toFormat("d MMMM yyyy");
+      const day = dt.toFormat("EEEE");
+      const time = dt.toFormat("h:mm a");
+
+      // Send WhatsApp message
+      if (whatsappService) {
+        let message = `🔔 *REMINDER NOW!*\n\n`;
+        message += `*${reminder.title}*\n\n`;
+        message += `Date: ${date}\n`;
+        message += `Day: ${day}\n`;
+        message += `Time: ${time}`;
+
+        // Build mentions array (include existing mentions + sender)
+        const mentions = [...reminder.mentions];
+        if (reminder.senderId && !mentions.includes(reminder.senderId)) {
+          mentions.push(reminder.senderId);
+        }
+
+        // Add all mentions at the end
+        if (mentions.length > 0) {
+          const cleanMentions = mentions
+            .map((jid) => `> @${this.cleanJidForDisplay(jid)}`)
+            .join("\n");
+          message += `\n\n${cleanMentions}`;
+        }
+
+        try {
+          await whatsappService.sendMessage(reminder.chatId, {
+            text: message,
+            mentions: mentions,
+          });
+          logger.info("Final reminder sent", {
+            reminderId,
+            chatId: reminder.chatId,
+            mentionCount: mentions.length,
+          });
+        } catch (error) {
+          logger.error("Failed to send final WhatsApp message", {
+            error: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack : undefined,
+            reminderId,
+            chatId: reminder.chatId,
+          });
+        }
+      } else {
+        logger.warn("WhatsApp service not available for final reminder");
+      }
+
+      // Mark as sent and clean up jobs
+      await prisma.reminder.update({
+        where: { id: reminderId },
+        data: { reminderSent: true },
+      });
+
+      this.jobs.delete(reminderId);
+    } catch (error) {
+      logger.error("Error sending final reminder", {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        reminderId,
+      });
+    }
+  }
+
+  /**
+   * Periodic check for reminders that might have been missed
+   * (e.g., if server was down)
+   */
+  private async checkAndSendDueReminders(): Promise<void> {
+    try {
+      const now = new Date();
+
+      // Check for missed 24h reminders
+      const missed24h = await prisma.reminder.findMany({
+        where: {
+          reminderSent: false,
+          reminder24hSent: false,
+          remindAtUtc: {
+            gte: now,
+            lte: new Date(now.getTime() + 24 * 60 * 60 * 1000 + 5 * 60 * 1000), // Within next 24h + 5min buffer
+          },
+        },
+      });
+
+      for (const reminder of missed24h) {
+        const twentyFourHoursBefore = new Date(
+          reminder.remindAtUtc.getTime() - 24 * 60 * 60 * 1000
+        );
+        if (twentyFourHoursBefore <= now) {
+          await this.send24HourReminder(reminder.id);
+        }
+      }
+
+      // Check for missed 1h reminders
+      const missed1h = await prisma.reminder.findMany({
+        where: {
+          reminderSent: false,
+          reminder1hSent: false,
+          remindAtUtc: {
+            gte: now,
+            lte: new Date(now.getTime() + 60 * 60 * 1000 + 5 * 60 * 1000), // Within next 1h + 5min buffer
+          },
+        },
+      });
+
+      for (const reminder of missed1h) {
+        const oneHourBefore = new Date(
+          reminder.remindAtUtc.getTime() - 60 * 60 * 1000
+        );
+        if (oneHourBefore <= now) {
+          await this.send1HourReminder(reminder.id);
+        }
+      }
+
+      // Check for missed 30m reminders
+      const missed30m = await prisma.reminder.findMany({
+        where: {
+          reminderSent: false,
+          reminder30mSent: false,
+          remindAtUtc: {
+            gte: now,
+            lte: new Date(now.getTime() + 30 * 60 * 1000 + 5 * 60 * 1000), // Within next 30m + 5min buffer
+          },
+        },
+      });
+
+      for (const reminder of missed30m) {
+        const thirtyMinutesBefore = new Date(
+          reminder.remindAtUtc.getTime() - 30 * 60 * 1000
+        );
+        if (thirtyMinutesBefore <= now) {
+          await this.send30MinuteReminder(reminder.id);
+        }
+      }
+
+      // Check for missed final reminders
+      const missedFinal = await prisma.reminder.findMany({
+        where: {
+          reminderSent: false,
+          remindAtUtc: {
+            lte: new Date(now.getTime() + 5 * 60 * 1000), // Past or within 5 minutes
+          },
+        },
+      });
+
+      for (const reminder of missedFinal) {
+        if (reminder.remindAtUtc <= now) {
+          await this.sendFinalReminder(reminder.id);
+        }
+      }
+    } catch (error) {
+      logger.error("Error checking for due reminders:", error);
+    }
+  }
+
+  /**
+   * Schedule daily digest to run at 8 AM every day
+   */
+  private scheduleDailyDigest(): void {
+    // Schedule for 8 AM every day
+    // Rule: { hour: 8, minute: 0 }
+    const rule = new schedule.RecurrenceRule();
+    rule.hour = 8;
+    rule.minute = 0;
+    rule.tz = "Asia/Kuwait"; // Default timezone
+
+    this.dailyDigestJob = schedule.scheduleJob(rule, async () => {
+      await this.sendDailyDigest();
+    });
+
+    logger.info("Daily digest scheduled", {
+      time: "08:00",
+      timezone: "Asia/Kuwait",
+    });
+  }
+
+  /**
+   * Send daily digest of all reminders for today
+   */
+  private async sendDailyDigest(): Promise<void> {
+    try {
+      logger.debug("Sending daily digest");
+
+      // Get all active reminders for today
+      const today = DateTime.now().setZone("Asia/Kuwait");
+      const startOfDay = today.startOf("day").toJSDate();
+      const endOfDay = today.endOf("day").toJSDate();
+
+      // Group reminders by chat
+      const reminders = await prisma.reminder.findMany({
+        where: {
+          reminderSent: false,
+          remindAtUtc: {
+            gte: startOfDay,
+            lte: endOfDay,
+          },
+        },
+        orderBy: {
+          remindAtUtc: "asc",
+        },
+      });
+
+      if (reminders.length === 0) {
+        logger.debug("No reminders for today, skipping daily digest");
+        return;
+      }
+
+      // Group by chatId
+      const remindersByChat = new Map<string, typeof reminders>();
+      for (const reminder of reminders) {
+        const chatReminders = remindersByChat.get(reminder.chatId) || [];
+        chatReminders.push(reminder);
+        remindersByChat.set(reminder.chatId, chatReminders);
+      }
+
+      // Send digest to each chat
+      for (const [chatId, chatReminders] of remindersByChat.entries()) {
+        await this.sendChatDailyDigest(chatId, chatReminders);
+      }
+
+      logger.info("Daily digest sent", {
+        chatCount: remindersByChat.size,
+        reminderCount: reminders.length,
+      });
+    } catch (error) {
+      logger.error("Error sending daily digest", {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+    }
+  }
+
+  /**
+   * Send daily digest to a specific chat
+   */
+  private async sendChatDailyDigest(
+    chatId: string,
+    reminders: any[]
+  ): Promise<void> {
+    if (!whatsappService) {
+      logger.warn("WhatsApp service not available for sending daily digest");
+      return;
+    }
+
+    try {
+      const today = DateTime.now().setZone("Asia/Kuwait");
+      const formattedDate = today.toFormat("EEEE, d'th' MMM");
+
+      let message = `Here are your reminders for *${formattedDate}*:\n\n`;
+
+      // Collect all mentions from all reminders
+      const allMentions: string[] = [];
+
+      for (const reminder of reminders) {
+        const localTime = DateTime.fromJSDate(reminder.remindAtUtc, {
+          zone: "utc",
+        })
+          .setZone(reminder.timezone)
+          .toFormat("h:mm a");
+
+        message += `- *${reminder.title}*\n`;
+        message += `   ${localTime}\n`;
+
+        // Collect and display mentions for this specific reminder
+        const reminderMentions: string[] = [...reminder.mentions];
+        if (
+          reminder.senderId &&
+          !reminderMentions.includes(reminder.senderId)
+        ) {
+          reminderMentions.push(reminder.senderId);
+        }
+
+        // Add to all mentions for WhatsApp API
+        for (const mention of reminderMentions) {
+          if (!allMentions.includes(mention)) {
+            allMentions.push(mention);
+          }
+        }
+
+        // Display mentions under this reminder
+        if (reminderMentions.length > 0) {
+          for (const mention of reminderMentions) {
+            const cleanMention = this.cleanJidForDisplay(mention);
+            message += `   @${cleanMention}\n`;
+          }
+        }
+
+        message += `\n`;
+      }
+
+      message += `_You'll receive notifications 1h and 30m before each reminder._`;
+
+      await whatsappService.sendMessage(chatId, {
+        text: message,
+        mentions: allMentions,
+      });
+
+      logger.info(
+        `✅ Daily digest sent to chat ${chatId} (${reminders.length} reminders)`
+      );
+    } catch (error) {
+      logger.error(`Failed to send daily digest to chat ${chatId}:`, error);
+    }
+  }
+
+  /**
+   * Add a new reminder to the scheduler
+   */
+  async addReminder(
+    reminderId: string,
+    remindAtUtc: Date,
+    reminder24hSent: boolean = false,
+    reminder1hSent: boolean = false,
+    reminder30mSent: boolean = false
+  ): Promise<void> {
+    logger.info(`Adding reminder ${reminderId} to scheduler`);
+    this.scheduleReminder(
+      reminderId,
+      remindAtUtc,
+      reminder24hSent,
+      reminder1hSent,
+      reminder30mSent
+    );
+  }
+
+  /**
+   * Clean JID for display by removing @lid or @s.whatsapp.net suffix
+   * Examples:
+   * - "100897539518569@lid" → "100897539518569"
+   * - "96569072509@s.whatsapp.net" → "96569072509"
+   */
+  private cleanJidForDisplay(jid: string): string {
+    return jid.replace(/@lid$/, "").replace(/@s\.whatsapp\.net$/, "");
+  }
+}
+
+// Singleton instance
+export const reminderScheduler = new ReminderScheduler();

@@ -24,3 +24,11 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+/src/generated/prisma
+
+# Build output
+/dist
+
+/prisma/migrations/
+
+/logs

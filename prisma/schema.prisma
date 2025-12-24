@@ -1,0 +1,58 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Reminder {
+  id               String    @id @default(uuid())
+  reminderId       Int       @default(autoincrement())
+  chatId           String
+  senderId         String?               
+  title            String
+  mentions         String[]              
+  remindAtUtc      DateTime
+  timezone         String    @default("Asia/Kuwait")
+  reminder24hSent  Boolean   @default(false)
+  reminder1hSent   Boolean   @default(false)
+  reminder30mSent  Boolean   @default(false)
+  reminderSent     Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([remindAtUtc])
+  @@index([chatId, remindAtUtc])
+}
+
+enum TaskStatus {
+  Pending
+  InProgress
+  Done
+  Cancelled
+}
+
+model Tasks {
+  id        String   @id @default(uuid())
+  taskId    Int      @default(autoincrement())
+  chatId    String
+  senderId  String?
+  title     String
+  assignedTo String[]
+  status    TaskStatus @default(Pending)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([chatId])
+  @@index([status])
+  @@map("tasks")
+}
+
