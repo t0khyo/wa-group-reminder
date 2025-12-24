@@ -89,13 +89,13 @@ export class TaskScheduler {
   private scheduleEveningDigest(): void {
     try {
       // Schedule for 10:00 PM every day in Kuwait timezone
-      // Using cron: minute hour * * * (0 21 * * * = 9:30 PM every day)
-      this.eveningDigestJob = schedule.scheduleJob("30 21 * * *", async () => {
-        logger.info("Running evening task digest at 9:30 PM...");
+      // Using cron: minute hour * * * (0 22 * * * = 10:00 PM every day)
+      this.eveningDigestJob = schedule.scheduleJob("0 22 * * *", async () => {
+        logger.info("Running evening task digest at 10:00 PM...");
         await this.sendTaskDigest("evening");
       });
 
-      logger.info("📅 Evening task digest scheduled for 9:30 PM daily");
+      logger.info("📅 Evening task digest scheduled for 10:00 PM daily");
     } catch (error) {
       logger.error("Error scheduling evening digest:", error);
     }
