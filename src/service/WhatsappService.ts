@@ -13,34 +13,24 @@ import qrcode from "qrcode-terminal";
 import logger from "../utils/logger.js";
 import { AiService } from "./AiService.js";
 import { RateLimiter } from "../utils/RateLimiter.js";
-import { taskService } from "./TaskService.js";
-import { reminderService } from "./ReminderService.js";
-import { TaskStatus } from "../generated/prisma/client.js";
-import { DateTime } from "luxon";
 import fs from "fs";
+import { CommandRegistry } from "../commands/CommandRegistry.js";
+import { HelpCommand } from "../commands/HelpCommand.js";
+import { MyTasksCommand } from "../commands/MyTasksCommand.js";
+import { MyRemindersCommand } from "../commands/MyRemindersCommand.js";
+import { AllTasksCommand } from "../commands/AllTasksCommand.js";
+import { AllRemindersCommand } from "../commands/AllRemindersCommand.js";
+import { RecentTasksCommand } from "../commands/RecentTasksCommand.js";
+import { RecentRemindersCommand } from "../commands/RecentRemindersCommand.js";
+import { TaskDigestCommand } from "../commands/TaskDigestCommand.js";
+import {
+  MessageContent,
+  BotIdentity,
+  MessageContext,
+} from "../types/index.js";
+import { cleanJidForDisplay } from "../utils/jidUtils.js";
 
-// Type definitions
-interface MessageContent {
-  text?: string;
-  [key: string]: any;
-}
 
-interface BotIdentity {
-  jid: string | null;
-  lid: string | null;
-  name: string;
-  phoneNumber?: string;
-}
-
-interface MessageContext {
-  chatId: string;
-  senderId: string;
-  isGroup: boolean;
-  text: string;
-  rawText: string;
-  quotedMessage?: proto.IMessage;
-  mentionedJids: string[];
-}
 
 export class WhatsappService {
   private socket: WASocket | null = null;
@@ -56,11 +46,21 @@ export class WhatsappService {
   private reconnectAttempts: number = 0;
   private readonly MAX_RECONNECT_ATTEMPTS = 10;
   private readonly RECONNECT_DELAY_MS = 5000;
+  private commandRegistry: CommandRegistry;
 
   constructor(aiService?: AiService, authPath: string = "./auth_info") {
     this.aiService = aiService || new AiService();
     this.authPath = authPath;
     this.rateLimiter = new RateLimiter(10, 60000); // 10 messages per minute per user
+    this.commandRegistry = new CommandRegistry();
+    this.commandRegistry.register(new HelpCommand());
+    this.commandRegistry.register(new MyTasksCommand());
+    this.commandRegistry.register(new MyRemindersCommand());
+    this.commandRegistry.register(new AllTasksCommand());
+    this.commandRegistry.register(new AllRemindersCommand());
+    this.commandRegistry.register(new RecentTasksCommand());
+    this.commandRegistry.register(new RecentRemindersCommand());
+    this.commandRegistry.register(new TaskDigestCommand());
   }
 
   /**
@@ -388,110 +388,36 @@ export class WhatsappService {
    * Handle slash commands for testing and development
    */
   private async handleCommand(context: MessageContext): Promise<boolean> {
-    const command = context.text.split(" ")[0].toLowerCase();
+    const commandName = context.text.split(" ")[0].toLowerCase();
 
     try {
-      // Exact matches first
-      switch (command) {
-        case "/help":
-        case "/h":
-          await this.handleHelpCommand(context);
-          return true;
-
-        case "/tasks":
-        case "/task":
-        case "/t":
-          await this.handleMyTasksCommand(context);
-          return true;
-
-        case "/all-tasks":
-        case "/all-task":
-        case "/all-t":
-        case "/alltasks":
-        case "/alltask":
-          await this.handleAllTasksCommand(context);
-          return true;
-
-        case "/reminders":
-        case "/reminder":
-        case "/meetings":
-        case "/meeting":
-        case "/my-reminders":
-        case "/my-meetings":
-        case "/m":
-          await this.handleMyRemindersCommand(context);
-          return true;
-
-        case "/all-reminders":
-        case "/all-reminder":
-        case "/all-r":
-        case "/allreminders":
-        case "/all-meetings":
-        case "/all-meeting":
-        case "/all-m":
-        case "/allm":
-          await this.handleAllRemindersCommand(context);
-          return true;
-
-        case "/recent-tasks":
-        case "/recent-task":
-        case "/recent-t":
-        case "/recent":
-        case "/r":
-          await this.handleRecentTasksCommand(context);
-          return true;
-
-        case "/recent-reminders":
-        case "/recent-reminder":
-        case "/recent-meetings":
-        case "/recent-meeting":
-        case "/recent-r":
-        case "/recent-m":
-          await this.handleRecentRemindersCommand(context);
-          return true;
-
-        case "/task-digest":
-        case "/digest":
-        case "/d":
-          await this.handleTaskDigestCommand(context);
-          return true;
+      // 1. Try Registry (Active)
+      const regCmd = this.commandRegistry.get(commandName);
+      if (regCmd) {
+        await regCmd.execute(context, {
+          whatsapp: this,
+          registry: this.commandRegistry,
+        });
+        return true;
       }
 
-      // Fuzzy matching for partial commands
-      const matchedCommand = this.findSimilarCommand(command);
+      // 2. Fuzzy matching via Registry
+      const matchedCommand = this.commandRegistry.findSimilar(commandName);
       if (matchedCommand) {
-        switch (matchedCommand) {
-          case "help":
-            await this.handleHelpCommand(context);
-            return true;
-          case "tasks":
-            await this.handleMyTasksCommand(context);
-            return true;
-          case "all-tasks":
-            await this.handleAllTasksCommand(context);
-            return true;
-          case "reminders":
-            await this.handleMyRemindersCommand(context);
-            return true;
-          case "all-reminders":
-            await this.handleAllRemindersCommand(context);
-            return true;
-          case "recent-tasks":
-            await this.handleRecentTasksCommand(context);
-            return true;
-          case "recent-reminders":
-            await this.handleRecentRemindersCommand(context);
-            return true;
-          case "task-digest":
-            await this.handleTaskDigestCommand(context);
-            return true;
+        const regCmd = this.commandRegistry.get(matchedCommand);
+        if (regCmd) {
+          await regCmd.execute(context, {
+            whatsapp: this,
+            registry: this.commandRegistry,
+          });
+          return true;
         }
       }
 
       return false;
     } catch (error) {
       logger.error("Command execution failed", {
-        command,
+        command: commandName,
         error: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined,
         chatId: context.chatId,
@@ -504,521 +430,6 @@ export class WhatsappService {
     }
   }
 
-  /**
-   * Find similar command using fuzzy matching
-   */
-  private findSimilarCommand(input: string): string | null {
-    const commands = [
-      { name: "help", variants: ["/help"] },
-      { name: "tasks", variants: ["/tasks", "/mytasks", "/my-tasks"] },
-      { name: "all-tasks", variants: ["/all-tasks", "/allt", "/all"] },
-      {
-        name: "reminders",
-        variants: ["/reminders", "/meetings", "/my-reminders", "/my-meetings"],
-      },
-      {
-        name: "all-reminders",
-        variants: [
-          "/all-reminders",
-          "/allreminders",
-          "/all-meetings",
-          "/allmeetings",
-        ],
-      },
-      { name: "recent-tasks", variants: ["/recent-tasks", "/recenttasks"] },
-      {
-        name: "recent-reminders",
-        variants: [
-          "/recent-reminders",
-          "/recentreminders",
-          "/recent-meetings",
-          "/recentmeetings",
-        ],
-      },
-      { name: "task-digest", variants: ["/task-digest", "/taskdigest"] },
-    ];
-
-    const cleanInput = input.replace(/^\//, "").toLowerCase();
-
-    // Find command that starts with the input
-    for (const cmd of commands) {
-      if (cmd.name.startsWith(cleanInput) && cleanInput.length >= 2) {
-        return cmd.name;
-      }
-
-      // Check variants
-      for (const variant of cmd.variants) {
-        const cleanVariant = variant.replace(/^\//, "").toLowerCase();
-        if (cleanVariant.startsWith(cleanInput) && cleanInput.length >= 2) {
-          return cmd.name;
-        }
-      }
-    }
-
-    return null;
-  }
-
-  /**
-   * Handle /help command - show available commands
-   */
-  private async handleHelpCommand(context: MessageContext): Promise<void> {
-    const message = `*GiGi Commands*
-
-*Task Commands:*
-• \`/tasks\` - Your active tasks
-• \`/all-tasks\` - All group tasks
-• \`/recent-tasks\` - Recently closed tasks
-• \`/task-digest\` - Manual task digest
-
-*Reminder Commands:*
-• \`/reminders\` or \`/meetings\` - Your active reminders
-• \`/all-reminders\` or \`/all-meetings\` - All group reminders
-• \`/recent-reminders\` or \`/recent-meetings\` - Recently completed reminders
-
-*Other:*
-• \`/help\` - Show this message
-
-💬 *Chat naturally by mentioning me to:*
-• Create tasks & reminders
-• Update task status
-• List & manage tasks
-
-📌 Mention users to assign tasks or say "assign me"`;
-
-    await this.sendMessage(context.chatId, {
-      text: message,
-    });
-  }
-
-  /**
-   * Handle /reminders or /meetings command - show sender's active reminders
-   */
-  private async handleMyRemindersCommand(
-    context: MessageContext
-  ): Promise<void> {
-    const allReminders = await reminderService.listReminders(
-      context.chatId,
-      "active"
-    );
-
-    // Filter reminders where the sender is mentioned or is the creator
-    const myReminders = allReminders.filter(
-      (r) =>
-        r.mentions?.includes(context.senderId) ||
-        r.createdBy === context.senderId
-    );
-
-    if (myReminders.length === 0) {
-      await this.sendMessage(context.chatId, {
-        text: `> @${this.cleanJidForDisplay(
-          context.senderId
-        )}\n\nYou have no active reminders.`,
-        mentions: [context.senderId],
-      });
-      return;
-    }
-
-    let message = `> @${this.cleanJidForDisplay(context.senderId)}\n\n`;
-    message += `You have *${myReminders.length}* Active Reminder${
-      myReminders.length > 1 ? "s" : ""
-    }\n\n`;
-
-    for (const reminder of myReminders) {
-      const reminderNumber = reminderService.formatReminderId(
-        reminder.reminderId
-      );
-
-      // Parse the scheduled time to get individual components
-      const dt = DateTime.fromJSDate(reminder.scheduledTime, {
-        zone: "Asia/Kuwait",
-      });
-
-      const date = dt.toFormat("d MMM yyyy");
-      const day = dt.toFormat("EEEE");
-      const time = dt.toFormat("h:mm a");
-
-      message += `*${reminderNumber}* - ${reminder.message}\n\n`;
-      message += `Date: ${date}\n`;
-      message += `Day: ${day}\n`;
-      message += `Time: ${time}`;
-
-      if (reminder.mentions && reminder.mentions.length > 0) {
-        const mentionsList = reminder.mentions
-          .map((m) => `> @${this.cleanJidForDisplay(m)}`)
-          .join("\n");
-        message += `\n\n${mentionsList}`;
-      }
-
-      message += `\n\n---\n\n`;
-    }
-
-    // Extract all unique mentions from the sender's reminders
-    const mentions: string[] = [context.senderId];
-    for (const reminder of myReminders) {
-      if (reminder.mentions) {
-        for (const mention of reminder.mentions) {
-          if (!mentions.includes(mention)) {
-            mentions.push(mention);
-          }
-        }
-      }
-    }
-
-    await this.sendMessage(context.chatId, {
-      text: message,
-      mentions: mentions,
-    });
-  }
-
-  /**
-   * Handle /all-reminders command - show all active reminders/meetings
-   */
-  private async handleAllRemindersCommand(
-    context: MessageContext
-  ): Promise<void> {
-    const activeReminders = await reminderService.listReminders(
-      context.chatId,
-      "active"
-    );
-
-    if (activeReminders.length === 0) {
-      await this.sendMessage(context.chatId, {
-        text: "No active reminders scheduled.",
-      });
-      return;
-    }
-
-    let message = `*Active Reminders* (${activeReminders.length})\n\n`;
-
-    for (const reminder of activeReminders) {
-      const reminderNumber = reminderService.formatReminderId(
-        reminder.reminderId
-      );
-
-      // Parse the scheduled time to get individual components
-      const dt = DateTime.fromJSDate(reminder.scheduledTime, {
-        zone: "Asia/Kuwait",
-      });
-
-      const date = dt.toFormat("d MMM yyyy");
-      const day = dt.toFormat("EEEE");
-      const time = dt.toFormat("h:mm a");
-
-      message += `*${reminderNumber}* - ${reminder.message}\n\n`;
-      message += `Date: ${date}\n`;
-      message += `Day: ${day}\n`;
-      message += `Time: ${time}`;
-
-      if (reminder.mentions && reminder.mentions.length > 0) {
-        const mentionsList = reminder.mentions
-          .map((m) => `> @${this.cleanJidForDisplay(m)}`)
-          .join("\n");
-        message += `\n\n${mentionsList}`;
-      }
-
-      message += `\n\n---\n\n`;
-    }
-
-    // Extract all mentions from reminders
-    const mentions: string[] = [];
-    for (const reminder of activeReminders) {
-      if (reminder.mentions) {
-        for (const mention of reminder.mentions) {
-          if (!mentions.includes(mention)) {
-            mentions.push(mention);
-          }
-        }
-      }
-    }
-
-    await this.sendMessage(context.chatId, {
-      text: message,
-      mentions: mentions.length > 0 ? mentions : undefined,
-    });
-  }
-
-  /**
-   * Handle /recent-reminders or /recent-meetings command - show recently completed reminders
-   */
-  private async handleRecentRemindersCommand(
-    context: MessageContext
-  ): Promise<void> {
-    const recentReminders = await reminderService.getRecentCompletedReminders(
-      context.chatId
-    );
-
-    if (recentReminders.length === 0) {
-      await this.sendMessage(context.chatId, {
-        text: "No reminders completed in the last 7 days.",
-      });
-      return;
-    }
-
-    let message = `*Recently Completed Reminders* (Last 7 days)\n\n`;
-    message += `✅ *Completed (${recentReminders.length}):*\n`;
-
-    for (const reminder of recentReminders) {
-      const reminderNumber = reminderService.formatReminderId(
-        reminder.reminderId
-      );
-
-      // Parse the scheduled time to get individual components
-      const dt = DateTime.fromJSDate(reminder.scheduledTime, {
-        zone: "Asia/Kuwait",
-      });
-
-      const date = dt.toFormat("d MMM yyyy");
-      const time = dt.toFormat("h:mm a");
-
-      const mentionsList =
-        reminder.mentions && reminder.mentions.length > 0
-          ? ` (${reminder.mentions
-              .map((m) => `@${this.cleanJidForDisplay(m)}`)
-              .join(", ")})`
-          : "";
-
-      message += `* *${reminderNumber}* - ${reminder.message} - ${date} at ${time}${mentionsList}\n\n`;
-    }
-
-    // Extract all mentions from reminders
-    const mentions: string[] = [];
-    for (const reminder of recentReminders) {
-      if (reminder.mentions) {
-        for (const mention of reminder.mentions) {
-          if (!mentions.includes(mention)) {
-            mentions.push(mention);
-          }
-        }
-      }
-    }
-
-    await this.sendMessage(context.chatId, {
-      text: message,
-      mentions: mentions.length > 0 ? mentions : undefined,
-    });
-  }
-
-  /**
-   * Handle /all-tasks command - show all active tasks in the chat
-   */
-  private async handleAllTasksCommand(context: MessageContext): Promise<void> {
-    const stats = await taskService.getTaskStats(context.chatId);
-    const pendingTasks = await taskService.listTasks(
-      context.chatId,
-      TaskStatus.Pending
-    );
-    const inProgressTasks = await taskService.listTasks(
-      context.chatId,
-      TaskStatus.InProgress
-    );
-
-    const activeTasks = [...pendingTasks, ...inProgressTasks];
-
-    let message = `*All Active Tasks*\n\n`;
-    message += `*Statistics:*\n`;
-    message += `Total: ${stats.total}\n`;
-    message += `🟡 Pending: ${stats.pending}\n`;
-    message += `🟠 In Progress: ${stats.inProgress}\n`;
-    message += `🟢 Done: ${stats.done}\n`;
-    message += `🔴 Cancelled: ${stats.cancelled}\n\n`;
-
-    if (activeTasks.length === 0) {
-      message += `No active tasks! 🎉`;
-    } else {
-      message += `*Active Tasks (${activeTasks.length}):*\n\n`;
-
-      // Group by assignee
-      const tasksByAssignee = new Map<string, typeof activeTasks>();
-      const unassignedTasks: typeof activeTasks = [];
-
-      for (const task of activeTasks) {
-        if (task.assignedTo && task.assignedTo.length > 0) {
-          for (const assignee of task.assignedTo) {
-            const assigneeTasks = tasksByAssignee.get(assignee) || [];
-            assigneeTasks.push(task);
-            tasksByAssignee.set(assignee, assigneeTasks);
-          }
-        } else {
-          unassignedTasks.push(task);
-        }
-      }
-
-      // Display tasks by assignee
-      for (const [assignee, tasks] of tasksByAssignee.entries()) {
-        const cleanAssignee = this.cleanJidForDisplay(assignee);
-        message += `> @${cleanAssignee}\n`;
-        for (const task of tasks) {
-          const emoji = taskService.getStatusEmoji(task.status);
-          const taskNumber = taskService.formatTaskId(task.taskId);
-          message += `* *${taskNumber}* - ${task.title} ${emoji}\n`;
-        }
-        message += `\n`;
-      }
-
-      // Unassigned tasks
-      if (unassignedTasks.length > 0) {
-        message += `*Unassigned:*\n`;
-        for (const task of unassignedTasks) {
-          const emoji = taskService.getStatusEmoji(task.status);
-          const taskNumber = taskService.formatTaskId(task.taskId);
-          message += `* *${taskNumber}* - ${task.title} ${emoji}\n`;
-        }
-      }
-    }
-
-    // Collect mentions
-    const mentions: string[] = [];
-    for (const task of activeTasks) {
-      if (task.assignedTo) {
-        for (const assignee of task.assignedTo) {
-          if (!mentions.includes(assignee)) {
-            mentions.push(assignee);
-          }
-        }
-      }
-    }
-
-    await this.sendMessage(context.chatId, { text: message, mentions });
-  }
-
-  /**
-   * Handle /tasks command - show tasks assigned to the sender
-   */
-  private async handleMyTasksCommand(context: MessageContext): Promise<void> {
-    logger.info(
-      `Fetching tasks for sender: ${context.senderId} in chat: ${context.chatId}`
-    );
-
-    const myTasks = await taskService.getTasksAssignedTo(
-      context.chatId,
-      context.senderId
-    );
-
-    logger.info(
-      `Found ${myTasks.length} total tasks assigned to ${context.senderId}`
-    );
-    logger.info(
-      `Tasks: ${JSON.stringify(
-        myTasks.map((t) => ({
-          id: t.taskId,
-          title: t.title,
-          status: t.status,
-          assignedTo: t.assignedTo,
-        }))
-      )}`
-    );
-
-    const activeTasks = myTasks.filter(
-      (t) =>
-        t.status === TaskStatus.Pending || t.status === TaskStatus.InProgress
-    );
-
-    logger.info(
-      `Filtered to ${activeTasks.length} active tasks (Pending or InProgress)`
-    );
-
-    const cleanSender = this.cleanJidForDisplay(context.senderId);
-    let message = `> @${cleanSender}\n\n`;
-
-    if (activeTasks.length === 0) {
-      message += `You have no active tasks! 🎉`;
-    } else {
-      message += `You have *${activeTasks.length}* active task(s):\n\n`;
-
-      for (const task of activeTasks) {
-        const emoji = taskService.getStatusEmoji(task.status);
-        const taskNumber = taskService.formatTaskId(task.taskId);
-        message += `* *${taskNumber}* - ${task.title} ${emoji}\n`;
-      }
-    }
-
-    await this.sendMessage(context.chatId, {
-      text: message,
-      mentions: [context.senderId],
-    });
-  }
-
-  /**
-   * Handle /recent-tasks command - show recently completed or cancelled tasks
-   */
-  private async handleRecentTasksCommand(
-    context: MessageContext
-  ): Promise<void> {
-    const recentTasks = await taskService.getRecentClosedTasks(context.chatId);
-
-    if (recentTasks.length === 0) {
-      await this.sendMessage(context.chatId, {
-        text: "No tasks completed or cancelled in the last 7 days.",
-      });
-      return;
-    }
-
-    let message = `*Recently Closed Tasks* (Last 7 days)\n\n`;
-
-    const completed = recentTasks.filter((t) => t.status === TaskStatus.Done);
-    const cancelled = recentTasks.filter(
-      (t) => t.status === TaskStatus.Cancelled
-    );
-
-    if (completed.length > 0) {
-      message += `✅ *Completed (${completed.length}):*\n`;
-      for (const task of completed) {
-        const taskNumber = taskService.formatTaskId(task.taskId);
-        const assignee =
-          task.assignedTo.length > 0
-            ? `@${this.cleanJidForDisplay(task.assignedTo[0])}`
-            : "unassigned";
-        message += `* *${taskNumber}* - ${task.title} (${assignee})\n`;
-      }
-      message += "\n";
-    }
-
-    if (cancelled.length > 0) {
-      message += `*Cancelled (${cancelled.length}):*\n`;
-      for (const task of cancelled) {
-        const taskNumber = taskService.formatTaskId(task.taskId);
-        const assignee =
-          task.assignedTo.length > 0
-            ? `@${this.cleanJidForDisplay(task.assignedTo[0])}`
-            : "unassigned";
-        message += `* *${taskNumber}* - ${task.title} (${assignee})\n`;
-      }
-    }
-
-    // Extract mentions from tasks
-    const mentions = recentTasks
-      .filter((t) => t.assignedTo.length > 0)
-      .map((t) => t.assignedTo[0])
-      .filter((jid, index, self) => self.indexOf(jid) === index); // unique
-
-    await this.sendMessage(context.chatId, {
-      text: message,
-      mentions: mentions.length > 0 ? mentions : undefined,
-    });
-  }
-
-  /**
-   * Handle /task-digest command - trigger task digest manually
-   */
-  private async handleTaskDigestCommand(
-    context: MessageContext
-  ): Promise<void> {
-    // Import TaskScheduler dynamically to avoid circular dependency
-    const { taskScheduler } = await import("../sheduler/TaskScheduler.js");
-
-    await taskScheduler.sendManualDigest(context.chatId, "morning");
-
-    logger.info(
-      `Manual task digest sent to ${context.chatId} by ${context.senderId}`
-    );
-  }
-
-  /**
-   * Clean JID for display by removing @lid or @s.whatsapp.net suffix
-   */
-  private cleanJidForDisplay(jid: string): string {
-    return jid.replace(/@lid$/, "").replace(/@s\.whatsapp\.net$/, "");
-  }
 
   /**
    * Extract message context and metadata
@@ -1034,7 +445,7 @@ export class WhatsappService {
     // Remove bot mentions so commands like "/tasks" work even when someone writes "@bot /tasks"
     const botMentions = [this.botIdentity.jid, this.botIdentity.lid]
       .filter(Boolean)
-      .map((jid) => this.cleanJidForDisplay(jid!))
+      .map((jid) => cleanJidForDisplay(jid!))
       .flatMap((jid) => [jid, jid.split(":")[0]]); // handle both full and short IDs
 
     const escapeRegex = (value: string) =>
