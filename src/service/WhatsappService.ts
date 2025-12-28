@@ -582,7 +582,9 @@ export class WhatsappService {
   }
 
   private cleanMessage(message: string): string {
-    const cleanedMessage = message.replace(/\*\*/g, "*").trim();
+    if (!message) return "";
+    let cleanedMessage = message.replace(/\*\*/g, "*").trim();
+    cleanedMessage = cleanedMessage.replace(/@lid/g, "");
     return cleanedMessage;
   }
 

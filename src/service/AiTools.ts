@@ -115,17 +115,25 @@ export const availableFunctions: any[] = [
     name: "list_tasks",
     description:
       "List all tasks for this chat. Can filter by status (Pending, InProgress, Done, Cancelled, or all).",
-    parameters: {
-      type: "object",
-      properties: {
-        status: {
-          type: "string",
-          enum: ["Pending", "InProgress", "Done", "Cancelled", "all"],
-          description: "Filter tasks by status. Default is 'all'",
+      parameters: {
+        type: "object",
+        properties: {
+          status: {
+            type: "string",
+            enum: ["Pending", "InProgress", "Done", "Cancelled", "all"],
+            description: "Filter tasks by status. Default is 'all'",
+          },
+          assign_to_sender: {
+            type: "boolean",
+            description: "Set to true if filtering tasks assigned to the sender (e.g. 'my tasks').",
+          },
+          user_mention_index: {
+            type: "number",
+            description: "Filter tasks assigned to a specific user by their mention index. 0-based index excluding bot.",
+          },
         },
+        additionalProperties: false,
       },
-      additionalProperties: false,
-    },
   },
   {
     type: "function",
@@ -170,24 +178,28 @@ export const availableFunctions: any[] = [
     name: "create_bulk_tasks",
     description:
       "Create multiple tasks for multiple users at once. Use this when a message contains tasks organized by user mentions (e.g., '@User1 Tasks: task1, task2' followed by '@User2 Tasks: task3, task4'). " +
-      "The user_mention_index refers to the position of the user in the mentionedJids array (0-based, excluding bot mentions). " +
-      "For example, if the message mentions @Bot, @User1, @User2, then User1 is index 0 and User2 is index 1. " +
-      "Extract all tasks for each mentioned user and create them in bulk. Remove emoji status indicators from task titles.",
+      "You can mixed tasks for the sender ('my tasks') and other users. " +
+      "Extract all tasks for each user and create them in bulk. Remove emoji status indicators from task titles.",
     parameters: {
       type: "object",
       properties: {
         tasks_by_user: {
           type: "array",
           description:
-            "Array of objects, each containing a user's mention index and their tasks. " +
+            "Array of objects, each containing a user (sender or mention index) and their tasks. " +
             "Each object represents one user and all their tasks from the message.",
           items: {
             type: "object",
             properties: {
+              assign_to_sender: {
+                type: "boolean",
+                description: "Set to true if these tasks are for the sender (e.g. 'my tasks'). If true, user_mention_index is ignored.",
+              },
               user_mention_index: {
                 type: "number",
                 description:
                   "The index of the user in the mentionedJids array (0-based, bot mentions excluded). " +
+                  "Required if assign_to_sender is false. " +
                   "Count mentions in order: first mentioned user (excluding bot) = 0, second = 1, third = 2, etc. " +
                   "If a user appears multiple times in the message, use the index of their first appearance.",
               },
@@ -195,7 +207,7 @@ export const availableFunctions: any[] = [
                 type: "array",
                 description:
                   "Array of task titles/descriptions for this user. " +
-                  "Extract tasks from lines that appear under this user's section (after their mention and before the next user's mention or end of message). " +
+                  "Extract tasks from lines that appear under this user's section. " +
                   "Remove emoji status indicators (🟡, 🟠, 🟢, 🔴) and bullet points (*, -, •) from task titles. " +
                   "Clean up extra whitespace and keep only the task description.",
                 items: {
@@ -203,7 +215,7 @@ export const availableFunctions: any[] = [
                 },
               },
             },
-            required: ["user_mention_index", "tasks"],
+            required: ["tasks"],
             additionalProperties: false,
           },
         },

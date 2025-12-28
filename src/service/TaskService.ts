@@ -68,13 +68,20 @@ export class TaskService {
    */
   async listTasks(
     chatId: string,
-    status?: TaskStatus | "all"
+    status?: TaskStatus | "all",
+    assignedTo?: string
   ): Promise<TaskDto[]> {
     try {
       const whereClause: any = { chatId };
 
       if (status && status !== "all") {
         whereClause.status = status;
+      }
+
+      if (assignedTo) {
+        whereClause.assignedTo = {
+          has: assignedTo,
+        };
       }
 
       const tasks = await prisma.tasks.findMany({
@@ -220,7 +227,7 @@ export class TaskService {
           // which statuses to include
         },
         orderBy: {
-          createdAt: "desc",
+          createdAt: "asc",
         },
       });
 

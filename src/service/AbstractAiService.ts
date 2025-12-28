@@ -32,6 +32,8 @@ interface CreateTaskParams {
 
 interface ListTasksParams {
   status?: "Pending" | "InProgress" | "Done" | "Cancelled" | "all";
+  assign_to_sender?: boolean;
+  user_mention_index?: number;
 }
 
 interface UpdateTaskParams {
@@ -45,7 +47,8 @@ interface DeleteTaskParams {
 
 interface CreateBulkTasksParams {
   tasks_by_user: Array<{
-    user_mention_index: number;
+    assign_to_sender?: boolean;
+    user_mention_index?: number;
     tasks: string[];
   }>;
 }
@@ -305,7 +308,20 @@ export abstract class AbstractAiService implements IAiService {
         try {
             logger.info(`Listing tasks for chat ${chatId}:`, args);
             const status = args.status === "all" ? undefined : (args.status as TaskStatus);
-            const tasks = await taskService.listTasks(chatId, status);
+            
+            let assignedTo: string | undefined;
+            const senderId = this.senderIds.get(chatId);
+            const mentionedJids = this.mentionedJids.get(chatId) || [];
+
+            if (args.assign_to_sender) {
+                if (senderId) assignedTo = senderId;
+            } else if (args.user_mention_index !== undefined) {
+                 if (args.user_mention_index >= 0 && args.user_mention_index < mentionedJids.length) {
+                     assignedTo = mentionedJids[args.user_mention_index];
+                 }
+            }
+
+            const tasks = await taskService.listTasks(chatId, status, assignedTo);
 
             if (tasks.length === 0) {
                 return JSON.stringify({
@@ -412,6 +428,8 @@ export abstract class AbstractAiService implements IAiService {
         }
     }
 
+
+
     protected async handleCreateBulkTasks(args: CreateBulkTasksParams, chatId: string): Promise<string> {
         try {
             logger.info(`Creating bulk tasks in chat ${chatId}:`, args);
@@ -421,12 +439,22 @@ export abstract class AbstractAiService implements IAiService {
             const errors: string[] = [];
 
             for (const userTasks of args.tasks_by_user) {
-                const { user_mention_index, tasks } = userTasks;
-                if (user_mention_index < 0 || user_mention_index >= mentionedJids.length) {
-                    errors.push(`Invalid mention index ${user_mention_index} (available: 0-${mentionedJids.length - 1})`);
-                    continue;
+                const { assign_to_sender, user_mention_index, tasks } = userTasks;
+                let assignedToJid: string | undefined;
+
+                if (assign_to_sender) {
+                   if (!senderId) {
+                       errors.push("Cannot assign to sender: senderId not found");
+                       continue;
+                   }
+                   assignedToJid = senderId;
+                } else {
+                    if (user_mention_index === undefined || user_mention_index < 0 || user_mention_index >= mentionedJids.length) {
+                        errors.push(`Invalid mention index ${user_mention_index} (available: 0-${mentionedJids.length - 1})`);
+                        continue;
+                    }
+                    assignedToJid = mentionedJids[user_mention_index];
                 }
-                const assignedToJid = mentionedJids[user_mention_index];
 
                 for (const taskTitle of tasks) {
                     if (!taskTitle || taskTitle.trim().length === 0) continue;
