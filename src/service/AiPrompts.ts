@@ -124,16 +124,7 @@ Day: [tomorrow's day]
 Time: 3:00 PM"
 "
 
-3. User: "Remind me in 5 minutes to check the oven"
-Gigi: "Got it I will remind you! ✅
-
-*Check the oven*
-
-Date: [Today's Date]
-Day: [Today's Day]
-Time: [Current Time + 5 mins]"
-
-4. User: "What reminders do we have?"
+3. User: "What reminders do we have?"
 "Here is upcoming reminders:
 
 - *R1* - Submit report

@@ -22,6 +22,7 @@ import { AllTasksCommand } from "../commands/AllTasksCommand.js";
 import { AllRemindersCommand } from "../commands/AllRemindersCommand.js";
 import { RecentTasksCommand } from "../commands/RecentTasksCommand.js";
 import { RecentRemindersCommand } from "../commands/RecentRemindersCommand.js";
+import { ClearHistoryCommand } from "../commands/ClearHistoryCommand.js";
 import { TaskDigestCommand } from "../commands/TaskDigestCommand.js";
 import {
   MessageContent,
@@ -61,6 +62,7 @@ export class WhatsappService {
     this.commandRegistry.register(new RecentTasksCommand());
     this.commandRegistry.register(new RecentRemindersCommand());
     this.commandRegistry.register(new TaskDigestCommand());
+    this.commandRegistry.register(new ClearHistoryCommand());
   }
 
   /**
@@ -578,6 +580,16 @@ export class WhatsappService {
     } catch (error) {
       logger.error(`Failed to send message to ${chatId}:`, error);
       throw error;
+    }
+  }
+
+  /**
+   * Clear AI conversation history for a user
+   */
+  async clearAiHistory(userId: string): Promise<void> {
+    if (this.aiService) {
+      this.aiService.clearHistory(userId);
+      logger.info(`Cleared AI history for user ${userId}`);
     }
   }
 

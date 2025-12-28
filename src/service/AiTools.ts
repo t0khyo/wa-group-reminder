@@ -15,8 +15,7 @@ export const availableFunctions: any[] = [
         datetime: {
           type: "string",
           description:
-            "Extract the exact datetime phrase *as written by the user* without modifying or interpreting it. " + 
-            "Relative times like 'in 5 minutes', 'tomorrow at 5pm', 'next monday' are VALID. Pass them exclusively as strings.",
+            "Extract the exact time phrase *as written by the user* without modifying or interpreting it",
         },
       },
       required: ["message", "datetime"],

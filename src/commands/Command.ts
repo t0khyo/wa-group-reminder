@@ -2,6 +2,7 @@ import { MessageContext } from "../types/index.js";
 
 export interface IWhatsappConnector {
   sendMessage(chatId: string, content: any): Promise<any>;
+  clearAiHistory(userId: string): Promise<void>;
 }
 
 export interface ICommandRegistry {
