@@ -322,17 +322,23 @@ export abstract class AbstractAiService implements IAiService {
             }
 
             const tasks = await taskService.listTasks(chatId, status, assignedTo);
-
-            if (tasks.length === 0) {
-                return JSON.stringify({
-                    success: true,
-                    count: 0,
-                    tasks: [],
-                    message: `No ${args.status || "pending"} tasks found.`,
-                });
+            
+            // Also fetch recent closed tasks for context
+            let recentClosedTasks = await taskService.getRecentClosedTasks(chatId, 7);
+            if (assignedTo) {
+                recentClosedTasks = recentClosedTasks.filter(t => t.assignedTo && t.assignedTo.includes(assignedTo));
             }
 
             const formattedTasks = tasks.map((t) => ({
+                id: t.id,
+                task_number: taskService.formatTaskId(t.taskId),
+                title: t.title,
+                status: t.status,
+                assigned_to: t.assignedTo,
+                emoji: taskService.getStatusEmoji(t.status),
+            }));
+
+            const formattedRecentTasks = recentClosedTasks.map((t) => ({
                 id: t.id,
                 task_number: taskService.formatTaskId(t.taskId),
                 title: t.title,
@@ -345,7 +351,8 @@ export abstract class AbstractAiService implements IAiService {
                 success: true,
                 count: tasks.length,
                 tasks: formattedTasks,
-                message: `Found ${tasks.length} ${args.status || "pending"} task(s)`,
+                recent_completed_tasks: formattedRecentTasks,
+                message: `Found ${tasks.length} ${args.status || "pending"} task(s). Also found ${recentClosedTasks.length} recently completed tasks.`,
             });
         } catch (error: any) {
             logger.error("Error listing tasks:", error);

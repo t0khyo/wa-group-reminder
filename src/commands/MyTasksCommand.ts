@@ -38,19 +38,36 @@ export class MyTasksCommand implements Command {
         t.status === TaskStatus.Pending || t.status === TaskStatus.InProgress
     );
 
-    logger.info(
-      `Filtered to ${activeTasks.length} active tasks (Pending or InProgress)`
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const recentClosedTasks = myTasks.filter(
+      (t) =>
+        (t.status === TaskStatus.Done || t.status === TaskStatus.Cancelled) &&
+        new Date(t.updatedAt) >= sevenDaysAgo
     );
+    // Sort recent closed tasks by date descending
+    recentClosedTasks.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+
+    logger.info(
+      `Filtered to ${activeTasks.length} active tasks and ${recentClosedTasks.length} recent closed tasks`
+    );
+
+    const allTasksToDisplay = [...activeTasks, ...recentClosedTasks];
+    // Sort by taskId for simple numerical ordering
+    allTasksToDisplay.sort((a, b) => a.taskId - b.taskId);
 
     const cleanSender = cleanJidForDisplay(context.senderId);
     let message = `> @${cleanSender}\n\n`;
 
-    if (activeTasks.length === 0) {
-      message += `You have no active tasks! 🎉`;
+    if (allTasksToDisplay.length === 0) {
+      message += `You have no active or recent tasks! 🎉`;
     } else {
-      message += `You have *${activeTasks.length}* active task(s):\n\n`;
+      message += `You have *${activeTasks.length}* active task(s)`;
+      if (recentClosedTasks.length > 0) message += ` and *${recentClosedTasks.length}* recently completed`;
+      message += `:\n\n`;
 
-      for (const task of activeTasks) {
+      for (const task of allTasksToDisplay) {
         const emoji = taskService.getStatusEmoji(task.status);
         const taskNumber = taskService.formatTaskId(task.taskId);
         message += `* *${taskNumber}* - ${task.title} ${emoji}\n`;
