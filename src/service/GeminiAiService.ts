@@ -61,8 +61,7 @@ export class GeminiAiService extends AbstractAiService {
     logger.info(`Gemini processing text from user ${userId}: "${text}"`);
 
     if (senderId) this.senderIds.set(userId, senderId);
-    if (mentionedJids && mentionedJids.length > 0)
-      this.mentionedJids.set(userId, mentionedJids);
+    if (mentionedJids) this.mentionedJids.set(userId, mentionedJids);
     if (rawText) this.rawTexts.set(userId, rawText);
 
     try {

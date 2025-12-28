@@ -53,24 +53,34 @@ export class MyTasksCommand implements Command {
       `Filtered to ${activeTasks.length} active tasks and ${recentClosedTasks.length} recent closed tasks`
     );
 
-    const allTasksToDisplay = [...activeTasks, ...recentClosedTasks];
-    // Sort by taskId for simple numerical ordering
-    allTasksToDisplay.sort((a, b) => a.taskId - b.taskId);
-
     const cleanSender = cleanJidForDisplay(context.senderId);
     let message = `> @${cleanSender}\n\n`;
 
-    if (allTasksToDisplay.length === 0) {
+    if (activeTasks.length === 0 && recentClosedTasks.length === 0) {
       message += `You have no active or recent tasks! 🎉`;
     } else {
-      message += `You have *${activeTasks.length}* active task(s)`;
-      if (recentClosedTasks.length > 0) message += ` and *${recentClosedTasks.length}* recently completed`;
-      message += `:\n\n`;
+      // --- Active Tasks ---
+      if (activeTasks.length === 0) {
+         message += `You have no active tasks! 🎉\n`;
+      } else {
+         message += `You have *${activeTasks.length}* active task(s):\n\n`;
 
-      for (const task of allTasksToDisplay) {
-        const emoji = taskService.getStatusEmoji(task.status);
-        const taskNumber = taskService.formatTaskId(task.taskId);
-        message += `* *${taskNumber}* - ${task.title} ${emoji}\n`;
+         for (const task of activeTasks) {
+            const emoji = taskService.getStatusEmoji(task.status);
+            const taskNumber = taskService.formatTaskId(task.taskId);
+            message += `* *${taskNumber}* - ${task.title} ${emoji}\n`;
+         }
+      }
+
+      // --- Recent Closed Tasks ---
+      if (recentClosedTasks.length > 0) {
+          if (activeTasks.length > 0) message += `\n`;
+          message += `*Recently Completed (Last 7 Days):*\n`;
+          for (const task of recentClosedTasks) {
+              const emoji = taskService.getStatusEmoji(task.status);
+              const taskNumber = taskService.formatTaskId(task.taskId);
+              message += `* *${taskNumber}* - ${task.title} ${emoji}\n`;
+          }
       }
     }
 
