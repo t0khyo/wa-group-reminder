@@ -182,11 +182,14 @@ export class TaskScheduler {
         TaskStatus.InProgress
       );
       
-      // Get completed tasks from the last 3 days
-      const recentClosedTasks = await taskService.getRecentClosedTasks(chatId, 3);
-      const completedTasks = recentClosedTasks.filter(
-        (t) => t.status === TaskStatus.Done
-      );
+      // Get completed tasks from the last 3 days (ONLY for morning digest)
+      let completedTasks: typeof pendingTasks = [];
+      if (period === "morning") {
+        const recentClosedTasks = await taskService.getRecentClosedTasks(chatId, 3);
+        completedTasks = recentClosedTasks.filter(
+          (t) => t.status === TaskStatus.Done
+        );
+      }
 
       const activeTasks = [...pendingTasks, ...inProgressTasks];
 
@@ -241,9 +244,9 @@ export class TaskScheduler {
       }
       
       if (period === "morning") {
-         statsMessage += `💪 Let's tackle these tasks today!`;
+         statsMessage += `Let's tackle these tasks today!`;
       } else {
-         statsMessage += `✨ Great work today!`;
+         statsMessage += `Great work today!`;
       }
 
       // Send Statistics Message
