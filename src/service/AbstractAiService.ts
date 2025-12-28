@@ -359,7 +359,8 @@ export abstract class AbstractAiService implements IAiService {
     protected async handleUpdateTask(args: UpdateTaskParams, chatId: string): Promise<string> {
         try {
             logger.info(`Updating task ${args.task_number} in chat ${chatId}:`, args);
-            const task = await taskService.getTaskByNumber(args.task_number, chatId);
+            const taskNumber = Number(args.task_number);
+            const task = await taskService.getTaskByNumber(taskNumber, chatId);
 
             if (!task) {
                 return JSON.stringify({
@@ -369,13 +370,13 @@ export abstract class AbstractAiService implements IAiService {
             }
 
             const updatedTask = await taskService.updateTaskStatus(task.id, args.status as TaskStatus);
-            const taskNumber = taskService.formatTaskId(updatedTask.taskId);
+            const formattedTaskNumber = taskService.formatTaskId(updatedTask.taskId);
 
             return JSON.stringify({
                 success: true,
                 task_id: updatedTask.id,
-                task_number: taskNumber,
-                message: `✅ Task ${taskNumber} status updated to ${args.status}`,
+                task_number: formattedTaskNumber,
+                message: `✅ Task ${formattedTaskNumber} status updated to ${args.status}`,
                 details: {
                     id: updatedTask.id,
                     taskId: updatedTask.taskId,
