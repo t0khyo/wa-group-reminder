@@ -127,7 +127,7 @@ export class GeminiAiService extends AbstractAiService {
             }
           });
           
-          logger.info(`Function ${functionName} response sent to Gemini.`);
+          logger.info(`Function ${functionName} response sent to Gemini:`, { response: functionResponseString });
         }
 
         // Send function responses back to the model

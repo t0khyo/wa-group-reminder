@@ -299,11 +299,12 @@ export class WhatsappService {
     // Extract message context
     const context = this.extractMessageContext(msg);
 
-    logger.debug("Processing message", {
+    logger.info("Processing message", {
       chatId: context.chatId,
       senderId: context.senderId,
       isGroup: context.isGroup,
       hasQuote: !!context.quotedMessage,
+      text: context.text // Log the input text
     });
 
     // Check if this is a reply to bot's message
@@ -363,10 +364,11 @@ export class WhatsappService {
         mentions: reply.mentions,
       });
 
-      logger.debug("AI reply sent", {
+      logger.info("AI reply sent", {
         chatId: context.chatId,
         senderId: context.senderId,
         hasMentions: !!reply.mentions && reply.mentions.length > 0,
+        reply: reply.text
       });
     } catch (error) {
       logger.error("Failed to generate AI reply", {

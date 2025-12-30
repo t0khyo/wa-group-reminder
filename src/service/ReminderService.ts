@@ -5,11 +5,12 @@ import { Reminder } from "../generated/prisma/client.js";
 import { DateTime } from "luxon";
 import { DEFAULT_TIMEZONE } from "../config/TimeZone.js";
 import { reminderScheduler } from "../sheduler/ReminderScheduler.js";
+import { cleanJidForDisplay } from "../utils/jidUtils.js";
 
 /**
  * ReminderService - Handles reminder creation, listing, and cancellation using Prisma
  */
-export interface ReminderDto {
+  export interface ReminderDto {
   id: string;
   reminderId: number;
   reminderNumber: string; // Formatted as R1, R2, etc.
@@ -22,59 +23,114 @@ export interface ReminderDto {
   status: "pending" | "active" | "completed" | "cancelled";
   createdAt: Date;
   createdBy: string;
+  conflicts?: string[]; // Array of conflict messages
+  conflictInvolvedJids?: string[]; // JIDs involved in conflicts
 }
 
 export class ReminderService {
   /**
-   * Format reminder ID as R1, R2, etc.
-   */
-  public formatReminderId(reminderId: number): string {
-    return `R${reminderId}`;
-  }
+    * Format reminder ID as R1, R2, etc.
+    */
+   public formatReminderId(reminderId: number): string {
+     return `R${reminderId}`;
+   }
+ 
+   /**
+    * Get a reminder by its number (not UUID)
+    */
+   async getReminderByNumber(
+     reminderNumber: number,
+     chatId: string
+   ): Promise<Reminder | null> {
+     const reminder = await prisma.reminder.findFirst({
+       where: {
+         reminderId: reminderNumber,
+         chatId,
+       },
+     });
+ 
+     return reminder;
+   }
+ 
+   /**
+    * Convert Prisma Reminder model to ReminderDto
+    */
+   private toReminderDto(reminder: Reminder, conflicts?: string[], conflictInvolvedJids?: string[]): ReminderDto {
+     const timezone = reminder.timezone || DEFAULT_TIMEZONE;
+     const dt = DateTime.fromJSDate(reminder.remindAtUtc, {
+       zone: "utc",
+     }).setZone(timezone);
+ 
+     // Format: "7 Dec 2025 at 1:53 AM" (no timezone, no em dash)
+     const scheduledTimeLocal = dt.toFormat("d MMM yyyy 'at' h:mm a");
+ 
+     return {
+       id: reminder.id,
+       reminderId: reminder.reminderId,
+       reminderNumber: this.formatReminderId(reminder.reminderId),
+       chatId: reminder.chatId,
+       message: reminder.title,
+       scheduledTime: reminder.remindAtUtc,
+       scheduledTimeLocal,
+       timezone,
+       mentions: reminder.mentions,
+       status: reminder.reminderSent ? "completed" : "active",
+       createdAt: reminder.createdAt,
+       createdBy: reminder.senderId || "system",
+       conflicts,
+       conflictInvolvedJids
+     };
+   }
 
   /**
-   * Get a reminder by its number (not UUID)
+   * Check for meeting conflicts
    */
-  async getReminderByNumber(
-    reminderNumber: number,
+  private async checkConflicts(
+    userIds: string[],     // senderId + mentions
+    scheduledTime: Date,
     chatId: string
-  ): Promise<Reminder | null> {
-    const reminder = await prisma.reminder.findFirst({
+  ): Promise<{ messages: string[], involvedJids: string[] }> {
+    const thirtyMinutesBefore = new Date(scheduledTime.getTime() - 30 * 60000);
+    const thirtyMinutesAfter = new Date(scheduledTime.getTime() + 30 * 60000);
+
+    // Find active reminders in the time window
+    const potentialConflicts = await prisma.reminder.findMany({
       where: {
-        reminderId: reminderNumber,
-        chatId,
+        chatId: chatId, 
+        reminderSent: false,
+        remindAtUtc: {
+          gte: thirtyMinutesBefore,
+          lte: thirtyMinutesAfter,
+        },
       },
     });
 
-    return reminder;
-  }
+    const conflicts: string[] = [];
+    const allInvolvedJids: Set<string> = new Set();
+    const userSet = new Set(userIds);
 
-  /**
-   * Convert Prisma Reminder model to ReminderDto
-   */
-  private toReminderDto(reminder: Reminder): ReminderDto {
-    const timezone = reminder.timezone || DEFAULT_TIMEZONE;
-    const dt = DateTime.fromJSDate(reminder.remindAtUtc, {
-      zone: "utc",
-    }).setZone(timezone);
+    for (const reminder of potentialConflicts) {
+      // Check if any of our 'userIds' are involved in this reminder (as sender or mentioned)
+      const reminderInvolvedUsers = new Set([reminder.senderId || "", ...reminder.mentions]);
+      
+      // Intersection
+      const involved = [...userSet].filter(u => reminderInvolvedUsers.has(u));
 
-    // Format: "7 Dec 2025 at 1:53 AM" (no timezone, no em dash)
-    const scheduledTimeLocal = dt.toFormat("d MMM yyyy 'at' h:mm a");
-
-    return {
-      id: reminder.id,
-      reminderId: reminder.reminderId,
-      reminderNumber: this.formatReminderId(reminder.reminderId),
-      chatId: reminder.chatId,
-      message: reminder.title,
-      scheduledTime: reminder.remindAtUtc,
-      scheduledTimeLocal,
-      timezone,
-      mentions: reminder.mentions,
-      status: reminder.reminderSent ? "completed" : "active",
-      createdAt: reminder.createdAt,
-      createdBy: reminder.senderId || "system",
-    };
+      if (involved.length > 0) {
+        involved.forEach(jid => allInvolvedJids.add(jid));
+        
+        const timeStr = DateTime.fromJSDate(reminder.remindAtUtc)
+            .setZone(reminder.timezone || DEFAULT_TIMEZONE)
+            .toFormat("h:mm a");
+            
+        const formattedInvolved = involved.map(jid => `@${cleanJidForDisplay(jid)}`).join(", ");
+        
+        conflicts.push(
+          `Conflict: Reminder "${reminder.title}" (${this.formatReminderId(reminder.reminderId)}) at ${timeStr} involves ${formattedInvolved}`
+        );
+      }
+    }
+    return { messages: conflicts, involvedJids: Array.from(allInvolvedJids) };
   }
 
   /**
@@ -88,6 +144,11 @@ export class ReminderService {
     createdBy: string = "system",
     timezone: string = DEFAULT_TIMEZONE
   ): Promise<ReminderDto> {
+    
+    // Check for conflicts
+    const involvedUsers = [createdBy, ...mentions].filter(u => u !== "system");
+    const conflictResult = await this.checkConflicts(involvedUsers, scheduledTime, chatId);
+
     let sent24hReminder = false;
     const tomorrowMidnight = DateTime.now().plus({ days: 1 }).startOf("day");
 
@@ -112,6 +173,7 @@ export class ReminderService {
       chatId,
       scheduledTime: reminder.remindAtUtc.toISOString(),
       mentionCount: mentions?.length || 0,
+      conflictsCount: conflictResult.messages.length
     });
 
     // Add to scheduler
@@ -122,7 +184,7 @@ export class ReminderService {
       reminder.reminder1hSent
     );
 
-    return this.toReminderDto(reminder);
+    return this.toReminderDto(reminder, conflictResult.messages, conflictResult.involvedJids);
   }
 
   /**

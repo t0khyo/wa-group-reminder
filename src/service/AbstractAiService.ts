@@ -107,15 +107,23 @@ export abstract class AbstractAiService implements IAiService {
                 senderId
             );
 
+            let message = `Reminder created! I'll remind you on ${reminder.scheduledTimeLocal}`;
+            if (reminder.conflicts && reminder.conflicts.length > 0) {
+                message += `\n\n⚠️ Conflicts detected:\n${reminder.conflicts.join("\n")}`;
+            }
+
+            const allMentions = Array.from(new Set([...contextMentions, ...(reminder.conflictInvolvedJids || [])]));
+
             return JSON.stringify({
                 success: true,
                 reminder_number: reminder.reminderNumber,
-                message: `Reminder created! I'll remind you on ${reminder.scheduledTimeLocal}`,
+                message: message,
                 details: {
                     reminder_number: reminder.reminderNumber,
                     message: args.message,
                     scheduled_time: reminder.scheduledTimeLocal,
-                    mentions: contextMentions,
+                    mentions: allMentions,
+                    conflicts: reminder.conflicts
                 },
             });
         } catch (error: any) {
