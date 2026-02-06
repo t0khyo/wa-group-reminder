@@ -39,7 +39,99 @@ Reminder created ✅
 
 ## Quick Start 🚀
 
-### Prerequisites
+### Option 1: Docker Compose (Recommended)
+
+The easiest way to run the bot with all dependencies included.
+
+**Prerequisites:**
+- Docker and Docker Compose installed
+- A WhatsApp account
+
+**Steps:**
+
+1. Clone the repository
+
+```bash
+git clone https://github.com/t0khyo/wa-group-reminder.git
+cd wa-group-reminder
+```
+
+2. Create environment file
+
+```bash
+# Copy the example file
+cp .env.example .env
+
+# Edit .env and add your API keys
+# For Gemini: Set GEMINI_API_KEY
+# For OpenAI: Set OPENAI_API_KEY and AI_PROVIDER=openai
+```
+
+3. Start the services
+
+```bash
+docker-compose up -d
+```
+
+4. View logs and scan QR code
+
+```bash
+docker-compose logs -f app
+```
+
+A QR code will appear in the logs. Open WhatsApp on your phone, go to `Settings → Linked Devices → Link a Device`, and scan the QR code.
+
+5. Verify it's running
+
+```bash
+docker-compose ps
+```
+
+**Common Commands:**
+
+```bash
+# View logs
+docker-compose logs -f app
+
+# Stop services
+docker-compose down
+
+# Restart services
+docker-compose restart
+
+# Rebuild after code changes
+docker-compose up --build -d
+
+# Access database directly (from inside container)
+docker-compose exec db psql -U postgres -d gigi_db
+
+# View persisted logs
+docker-compose exec app ls -la /app/logs
+```
+
+**Security Notes:**
+
+> [!IMPORTANT]
+> **Database Port Access**
+> 
+> The database port is NOT exposed by default for security. The app connects to the database internally within the Docker network. If you need external database access (e.g., from pgAdmin or TablePlus):
+> 1. Uncomment the `ports` section in `docker-compose.yml` under the `db` service
+> 2. Set a strong `POSTGRES_PASSWORD` in your `.env` file
+> 3. Never expose the database with default credentials on a public server
+
+> [!NOTE]
+> **Log Persistence**
+> 
+> Logs are stored in a Docker volume (`logs-data`) to avoid permission issues with the non-root user. To access logs, use `docker-compose logs -f app` or `docker-compose exec app cat /app/logs/app.log`
+
+**Troubleshooting:**
+
+- **QR code expired?** Restart the app: `docker-compose restart app`
+- **Database connection failed?** Check database is healthy: `docker-compose ps`
+- **Authentication lost after restart?** This shouldn't happen as auth is persisted in a volume
+- **Can't access logs?** Use `docker-compose logs -f app` to view application logs
+
+### Option 2: Manual Installation
 
 - Node.js 18.x or higher
 - npm or yarn

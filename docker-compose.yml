@@ -1,39 +1,66 @@
 services:
-  # app:
-  #   build: .
-  #   container_name: gigi-wa-bot
-  #   restart: unless-stopped
-  #   depends_on:
-  #     - db
-  #   environment:
-  #     # use the DATABASE_URL env var if provided; otherwise fallback to the default that points to the db service
-  #     DATABASE_URL: ${DATABASE_URL:postgresql://postgres:postgres@db:5432/gigi_db?schema=public}
-  #     OPENAI_API_KEY: ${OPENAI_API_KEY}
-  #     NODE_ENV: production
-  #   volumes:
-  #     - .:/app
-  #   command: ["npm", "run", "start"]
-  #   ports:
-  #     - "3000:3000"
+  app:
+    build: .
+    container_name: gigi-wa-bot
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Database
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/gigi_db?schema=public}
+      
+      # AI Provider
+      AI_PROVIDER: ${AI_PROVIDER:-gemini}
+      
+      # OpenAI (optional)
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-gpt-4}
+      
+      # Gemini (optional)
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash-exp}
+      
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      
+      # Environment
+      NODE_ENV: ${NODE_ENV:-production}
+    volumes:
+      # Persist WhatsApp authentication data
+      - auth-data:/app/auth_info
+      # Persist logs - using named volume to avoid permission issues with non-root user
+      - logs-data:/app/logs
+    healthcheck:
+      test: ["CMD", "node", "-e", "process.exit(0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
 
   db:
-    image: postgres:16
+    image: postgres:16-alpine
     container_name: gigi-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: gigi_db
-    ports:
-      - "5437:5432" # host:container -> externally reachable on localhost:5437
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-gigi_db}
+    # Port mapping commented out for security (app connects internally)
+    # Uncomment only if you need external database access (e.g., from pgAdmin/TablePlus)
+    # If you enable this, make sure to set a strong POSTGRES_PASSWORD in .env
+    # ports:
+    #   - "${DB_PORT:-5437}:5432"
     volumes:
       - db-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d gigi_db"]
-      interval: 5s
+      interval: s
       timeout: 5s
       retries: 10
       start_period: 5s
 
 volumes:
   db-data:
+  auth-data:
+  logs-data:
