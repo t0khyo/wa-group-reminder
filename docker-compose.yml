@@ -1,14 +1,14 @@
 services:
-  app:
+  gigi-bot:
     build: .
     container_name: gigi-wa-bot
     restart: unless-stopped
     depends_on:
-      db:
+      gigi-db:
         condition: service_healthy
     environment:
       # Database
-      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/gigi_db?schema=public}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@gigi-db:5432/gigi_db?schema=public}
       
       # AI Provider
       AI_PROVIDER: ${AI_PROVIDER:-gemini}
@@ -38,7 +38,7 @@ services:
       retries: 3
       start_period: 60s
 
-  db:
+  gigi-db:
     image: postgres:16-alpine
     container_name: gigi-db
     restart: unless-stopped
@@ -55,7 +55,7 @@ services:
       - db-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d gigi_db"]
-      interval: s
+      interval: 5s
       timeout: 5s
       retries: 10
       start_period: 5s

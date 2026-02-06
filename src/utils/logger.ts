@@ -18,7 +18,7 @@ const combinedRotateTransport = new DailyRotateFile({
   filename: "logs/app-%DATE%.log",
   datePattern: "YYYY-MM-DD",
   maxSize: "20m", // Rotate if file exceeds 20MB
-  maxFiles: "30d", // Keep logs for 30 days
+  maxFiles: "15d", // Keep logs for 15 days
   zippedArchive: true, // Compress old logs
 });
 

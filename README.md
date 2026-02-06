@@ -91,7 +91,7 @@ docker-compose ps
 
 ```bash
 # View logs
-docker-compose logs -f app
+docker-compose logs -f gigi-bot
 
 # Stop services
 docker-compose down
@@ -103,10 +103,10 @@ docker-compose restart
 docker-compose up --build -d
 
 # Access database directly (from inside container)
-docker-compose exec db psql -U postgres -d gigi_db
+docker-compose exec gigi-db psql -U postgres -d gigi_db
 
 # View persisted logs
-docker-compose exec app ls -la /app/logs
+docker-compose exec gigi-bot ls -la /app/logs
 ```
 
 **Security Notes:**
@@ -122,20 +122,20 @@ docker-compose exec app ls -la /app/logs
 > [!NOTE]
 > **Log Persistence**
 > 
-> Logs are stored in a Docker volume (`logs-data`) to avoid permission issues with the non-root user. To access logs, use `docker-compose logs -f app` or `docker-compose exec app cat /app/logs/app.log`
+> Logs are stored in a Docker volume (`logs-data`) to avoid permission issues with the non-root user. To access logs, use `docker-compose logs -f gigi-bot` or `docker-compose exec gigi-bot cat /app/logs/app.log`
 
 **Troubleshooting:**
 
-- **QR code expired?** Restart the app: `docker-compose restart app`
+- **QR code expired?** Restart the app: `docker-compose restart gigi-bot`
 - **Database connection failed?** Check database is healthy: `docker-compose ps`
 - **Authentication lost after restart?** This shouldn't happen as auth is persisted in a volume
-- **Can't access logs?** Use `docker-compose logs -f app` to view application logs
+- **Can't access logs?** Use `docker-compose logs -f gigi-bot` to view application logs
 
 ### Option 2: Manual Installation
 
 - Node.js 18.x or higher
 - npm or yarn
-- PostgreSQL 14+ or SQLite (development)
+- PostgreSQL 14+
 - A WhatsApp account
 
 ### Installation
