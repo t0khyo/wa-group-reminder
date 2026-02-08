@@ -40,16 +40,12 @@ export function parseDateTime(
     throw new DateParseError(`Invalid timezone: ${timezone}`, dateTimeString);
   }
 
-  // Get current time in the TARGET timezone (not system timezone)
-  // This ensures "5pm" is interpreted as 5pm Kuwait time, not 5pm system time
-  const nowInTargetTz = DateTime.now().setZone(timezone);
-  const referenceDate = nowInTargetTz.toJSDate();
-
+  const now = new Date();
   let parsedDate: Date | null = null;
 
   // Try chrono-node first (handles most natural language dates)
-  // Use the timezone-aware reference date so chrono interprets times in the target timezone
-  parsedDate = chrono.parseDate(dateTimeString, referenceDate, { forwardDate: true });
+  // NOTE: chrono-node doesn't support timezones - it always parses in system timezone
+  parsedDate = chrono.parseDate(dateTimeString, now, { forwardDate: true });
 
   // Fallback: Try ISO string parsing
   if (!parsedDate) {
@@ -67,22 +63,38 @@ export function parseDateTime(
     );
   }
 
+  // CRITICAL FIX: chrono parses in system timezone, but we want Kuwait timezone
+  // Solution: Extract the date/time components and recreate in target timezone
+  
+  // Get the parsed date components (these represent the user's intended local time)
+  const parsedDt = DateTime.fromJSDate(parsedDate);
+  
+  // Recreate the same local time components in the TARGET timezone
+  // E.g., if user said "7pm" and chrono parsed as "7pm system time",
+  // we want "7pm Kuwait time" instead
+  const dtInTargetTz = DateTime.fromObject({
+    year: parsedDt.year,
+    month: parsedDt.month,
+    day: parsedDt.day,
+    hour: parsedDt.hour,
+    minute: parsedDt.minute,
+    second: parsedDt.second,
+  }, { zone: timezone });
+
   // Validate date is in the future (with 1 minute buffer for processing time)
-  const oneMinuteFromNow = new Date(referenceDate.getTime() + 60000);
-  if (parsedDate < oneMinuteFromNow) {
+  const nowInTargetTz = DateTime.now().setZone(timezone);
+  const oneMinuteFromNow = nowInTargetTz.plus({ minutes: 1 });
+  
+  if (dtInTargetTz < oneMinuteFromNow) {
     throw new DateParseError(
-      `Date must be in the future. Parsed: ${parsedDate.toLocaleString()}`,
+      `Date must be in the future. Parsed: ${dtInTargetTz.toLocaleString(DateTime.DATETIME_FULL)}`,
       dateTimeString
     );
   }
 
-  // The parsed date from chrono is already in the target timezone context
-  // We need to interpret it as a local time in the target timezone
-  const dtLocal = DateTime.fromJSDate(parsedDate, { zone: timezone });
-
   return {
-    utc: dtLocal.toUTC().toJSDate(),
-    localIso: dtLocal.toISO() || dtLocal.toString(),
+    utc: dtInTargetTz.toUTC().toJSDate(),
+    localIso: dtInTargetTz.toISO() || dtInTargetTz.toString(),
     timezone,
   };
 }
