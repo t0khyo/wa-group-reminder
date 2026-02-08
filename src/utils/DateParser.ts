@@ -33,12 +33,23 @@ export function parseDateTime(
     );
   }
 
-  const now = new Date();
+  // Validate timezone is valid first
+  try {
+    DateTime.local({ zone: timezone });
+  } catch {
+    throw new DateParseError(`Invalid timezone: ${timezone}`, dateTimeString);
+  }
+
+  // Get current time in the TARGET timezone (not system timezone)
+  // This ensures "5pm" is interpreted as 5pm Kuwait time, not 5pm system time
+  const nowInTargetTz = DateTime.now().setZone(timezone);
+  const referenceDate = nowInTargetTz.toJSDate();
+
   let parsedDate: Date | null = null;
 
   // Try chrono-node first (handles most natural language dates)
-  // This includes: "in 2 hours", "tomorrow at 3pm", "next Monday", etc.
-  parsedDate = chrono.parseDate(dateTimeString, now, { forwardDate: true });
+  // Use the timezone-aware reference date so chrono interprets times in the target timezone
+  parsedDate = chrono.parseDate(dateTimeString, referenceDate, { forwardDate: true });
 
   // Fallback: Try ISO string parsing
   if (!parsedDate) {
@@ -57,7 +68,7 @@ export function parseDateTime(
   }
 
   // Validate date is in the future (with 1 minute buffer for processing time)
-  const oneMinuteFromNow = new Date(now.getTime() + 60000);
+  const oneMinuteFromNow = new Date(referenceDate.getTime() + 60000);
   if (parsedDate < oneMinuteFromNow) {
     throw new DateParseError(
       `Date must be in the future. Parsed: ${parsedDate.toLocaleString()}`,
@@ -65,14 +76,8 @@ export function parseDateTime(
     );
   }
 
-  // Validate timezone is valid
-  try {
-    DateTime.local({ zone: timezone });
-  } catch {
-    throw new DateParseError(`Invalid timezone: ${timezone}`, dateTimeString);
-  }
-
-  // Convert to Luxon DateTime in specified timezone
+  // The parsed date from chrono is already in the target timezone context
+  // We need to interpret it as a local time in the target timezone
   const dtLocal = DateTime.fromJSDate(parsedDate, { zone: timezone });
 
   return {
