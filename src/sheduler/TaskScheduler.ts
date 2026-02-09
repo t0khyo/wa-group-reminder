@@ -71,13 +71,18 @@ export class TaskScheduler {
   private scheduleMorningDigest(): void {
     try {
       // Schedule for 8:05 AM every day in Kuwait timezone
-      // Using cron: minute hour * * * (5 8 * * * = 8:05 AM every day)
-      this.morningDigestJob = schedule.scheduleJob("5 8 * * *", async () => {
-        logger.info("Running morning task digest at 8:05 AM...");
+      // Using RecurrenceRule with timezone support
+      const rule = new schedule.RecurrenceRule();
+      rule.hour = 8;
+      rule.minute = 5;
+      rule.tz = DEFAULT_TIMEZONE; // Asia/Kuwait
+
+      this.morningDigestJob = schedule.scheduleJob(rule, async () => {
+        logger.info("Running morning task digest at 8:05 AM Kuwait time...");
         await this.sendTaskDigest("morning");
       });
 
-      logger.info("📅 Morning task digest scheduled for 8:05 AM daily");
+      logger.info(`📅 Morning task digest scheduled for 8:05 AM daily (${DEFAULT_TIMEZONE})`);
     } catch (error) {
       logger.error("Error scheduling morning digest:", error);
     }
@@ -89,13 +94,18 @@ export class TaskScheduler {
   private scheduleEveningDigest(): void {
     try {
       // Schedule for 10:00 PM every day in Kuwait timezone
-      // Using cron: minute hour * * * (0 22 * * * = 10:00 PM every day)
-      this.eveningDigestJob = schedule.scheduleJob("0 22 * * *", async () => {
-        logger.info("Running evening task digest at 10:00 PM...");
+      // Using RecurrenceRule with timezone support
+      const rule = new schedule.RecurrenceRule();
+      rule.hour = 22;
+      rule.minute = 0;
+      rule.tz = DEFAULT_TIMEZONE; // Asia/Kuwait
+
+      this.eveningDigestJob = schedule.scheduleJob(rule, async () => {
+        logger.info("Running evening task digest at 10:00 PM Kuwait time...");
         await this.sendTaskDigest("evening");
       });
 
-      logger.info("📅 Evening task digest scheduled for 10:00 PM daily");
+      logger.info(`📅 Evening task digest scheduled for 10:00 PM daily (${DEFAULT_TIMEZONE})`);
     } catch (error) {
       logger.error("Error scheduling evening digest:", error);
     }

@@ -2,6 +2,7 @@ import * as schedule from "node-schedule";
 import { prisma } from "../lib/prisma.js";
 import logger from "../utils/logger.js";
 import { DateTime, Zone } from "luxon";
+import { DEFAULT_TIMEZONE } from "../config/TimeZone.js";
 
 // We'll set the WhatsApp service instance after initialization
 let whatsappService: any = null;
@@ -633,7 +634,7 @@ export class ReminderScheduler {
     const rule = new schedule.RecurrenceRule();
     rule.hour = 8;
     rule.minute = 0;
-    rule.tz = "Asia/Kuwait"; // Default timezone
+    rule.tz = DEFAULT_TIMEZONE; // Use configured timezone
 
     this.dailyDigestJob = schedule.scheduleJob(rule, async () => {
       await this.sendDailyDigest();
@@ -641,7 +642,7 @@ export class ReminderScheduler {
 
     logger.info("Daily digest scheduled", {
       time: "08:00",
-      timezone: "Asia/Kuwait",
+      timezone: DEFAULT_TIMEZONE,
     });
   }
 
