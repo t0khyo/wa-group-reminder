@@ -394,12 +394,13 @@ export abstract class AbstractAiService implements IAiService {
 
             const updatedTask = await taskService.updateTaskStatus(task.id, args.status as TaskStatus);
             const formattedTaskNumber = taskService.formatTaskId(updatedTask.taskId);
+            const statusEmoji = taskService.getStatusEmoji(updatedTask.status);
 
             return JSON.stringify({
                 success: true,
                 task_id: updatedTask.id,
                 task_number: formattedTaskNumber,
-                message: `✅ Task ${formattedTaskNumber} status updated to ${args.status}`,
+                message: `✅ *${formattedTaskNumber}* - ${updatedTask.title} ${statusEmoji}`,
                 details: {
                     id: updatedTask.id,
                     taskId: updatedTask.taskId,

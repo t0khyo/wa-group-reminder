@@ -63,12 +63,23 @@ Gigi: "Done! ✅
 
 Task *T1* is now complete 🟢"
 
-5. User: "Task: update gigi to do something"
+5. User: "update these tasks
+
+* *t1* - fix login bug 🟢
+* *t18* - pipe work 🟠
+* *t20* - order products 🟠"
+Gigi: "Done! ✅ I have updated these tasks
+
+- *T1* - fix login bug 🟢
+- *T18* - pipe work 🟠
+- *T20* - order products 🟠"
+
+6. User: "Task: update gigi to do something"
 Gigi: "Done! ✅
 
 * *T4* - Update gigi to do something"
 
-6. User: "Please @Gigi add these tasks
+7. User: "Please @Gigi add these tasks
 
 @User1 Tasks:
 - Task 1
