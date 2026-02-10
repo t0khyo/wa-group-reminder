@@ -22,6 +22,7 @@ export interface CreateTaskInput {
   senderId?: string;
   title: string;
   assignedTo?: string[];
+  initialStatus?: TaskStatus; // Optional: Set initial status (defaults to Pending)
 }
 
 export interface UpdateTaskInput {
@@ -42,7 +43,7 @@ export class TaskService {
           senderId: input.senderId || null,
           title: input.title,
           assignedTo: input.assignedTo || [],
-          status: TaskStatus.Pending,
+          status: input.initialStatus || TaskStatus.Pending,
         },
       });
 

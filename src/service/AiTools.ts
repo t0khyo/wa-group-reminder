@@ -178,8 +178,10 @@ export const availableFunctions: any[] = [
     name: "create_bulk_tasks",
     description:
       "Create multiple tasks for multiple users at once. Use this when a message contains tasks organized by user mentions (e.g., '@User1 Tasks: task1, task2' followed by '@User2 Tasks: task3, task4'). " +
-      "You can mixed tasks for the sender ('my tasks') and other users. " +
-      "Extract all tasks for each user and create them in bulk. Remove emoji status indicators from task titles.",
+      "You can mix tasks for the sender ('my tasks') and other users. " +
+      "Extract all tasks for each user and create them in bulk. " +
+      "IMPORTANT: Keep emoji status indicators (🟡🟠🟢🔴) in the task titles exactly as they appear - do NOT remove them. The backend uses these to set initial status: 🟡=Pending, 🟠=InProgress, 🟢=Done, 🔴=Cancelled. Tasks without emojis will default to Done. " +
+      "Remove only bullet points (*, -, •) from the start of task titles, but preserve the emojis.",
     parameters: {
       type: "object",
       properties: {

@@ -484,19 +484,18 @@ export abstract class AbstractAiService implements IAiService {
                 for (const taskTitle of tasks) {
                     if (!taskTitle || taskTitle.trim().length === 0) continue;
                     
-                    let cleanedTitle = taskTitle.trim();
-                    cleanedTitle = cleanedTitle.replace(/[🟡🟠🟢🔴]/g, "").trim();
-                    cleanedTitle = cleanedTitle.replace(/^[\*\-\•\⁠]+/, "").trim();
-                    cleanedTitle = cleanedTitle.replace(/\s+/g, " ").trim();
+                    // Extract status from emoji and clean title
+                    const { cleanTitle, status } = this.extractStatusFromTitle(taskTitle);
 
-                    if (cleanedTitle.length === 0) continue;
+                    if (cleanTitle.length === 0) continue;
 
                     try {
                         const task = await taskService.createTask({
                             chatId: ctx.chatId,
                             senderId: senderId || undefined,
-                            title: cleanedTitle,
+                            title: cleanTitle,
                             assignedTo: [assignedToJid],
+                            initialStatus: status,
                         });
                         const taskNumber = taskService.formatTaskId(task.taskId);
                         createdTasks.push({
@@ -553,6 +552,37 @@ export abstract class AbstractAiService implements IAiService {
                 error: "Failed to create bulk tasks: " + error.message,
             });
         }
+    }
+    
+    /**
+     * Extract status from emoji indicator in task title
+     * Emojis: 🟡=Pending, 🟠=InProgress, 🟢=Done, 🔴=Cancelled
+     * Default: Done (for imported completed tasks)
+     */
+    protected extractStatusFromTitle(taskTitle: string): { cleanTitle: string; status: TaskStatus } {
+        const trimmed = taskTitle.trim();
+        
+        // Detect emoji and determine status
+        let status: TaskStatus;
+        if (/🟡/.test(trimmed)) {
+            status = TaskStatus.Pending;
+        } else if (/🟠/.test(trimmed)) {
+            status = TaskStatus.InProgress;
+        } else if (/🟢/.test(trimmed)) {
+            status = TaskStatus.Done;
+        } else if (/🔴/.test(trimmed)) {
+            status = TaskStatus.Cancelled;
+        } else {
+            // Default to Done for tasks without emoji (imported completed tasks)
+            status = TaskStatus.Done;
+        }
+        
+        // Clean title: remove emojis, bullets, and extra whitespace
+        let cleanTitle = trimmed.replace(/[🟡🟠🟢🔴]/g, "").trim();
+        cleanTitle = cleanTitle.replace(/^[\*\-\•\⁠]+/, "").trim();
+        cleanTitle = cleanTitle.replace(/\s+/g, " ").trim();
+        
+        return { cleanTitle, status };
     }
     
     protected cleanTextMessage(text: string): string {
