@@ -40,11 +40,12 @@ export function parseDateTime(
     throw new DateParseError(`Invalid timezone: ${timezone}`, dateTimeString);
   }
 
+  // With TZ=Asia/Kuwait set in Docker, system time now matches our app timezone
+  // This means chrono-node will parse times correctly in Kuwait timezone automatically
   const now = new Date();
   let parsedDate: Date | null = null;
 
   // Try chrono-node first (handles most natural language dates)
-  // NOTE: chrono-node doesn't support timezones - it always parses in system timezone
   parsedDate = chrono.parseDate(dateTimeString, now, { forwardDate: true });
 
   // Fallback: Try ISO string parsing
@@ -63,23 +64,9 @@ export function parseDateTime(
     );
   }
 
-  // CRITICAL FIX: chrono parses in system timezone, but we want Kuwait timezone
-  // Solution: Extract the date/time components and recreate in target timezone
-  
-  // Get the parsed date components (these represent the user's intended local time)
-  const parsedDt = DateTime.fromJSDate(parsedDate);
-  
-  // Recreate the same local time components in the TARGET timezone
-  // E.g., if user said "7pm" and chrono parsed as "7pm system time",
-  // we want "7pm Kuwait time" instead
-  const dtInTargetTz = DateTime.fromObject({
-    year: parsedDt.year,
-    month: parsedDt.month,
-    day: parsedDt.day,
-    hour: parsedDt.hour,
-    minute: parsedDt.minute,
-    second: parsedDt.second,
-  }, { zone: timezone });
+  // Convert the parsed date to target timezone
+  // Since system timezone = target timezone, parsedDate is already in the right timezone
+  const dtInTargetTz = DateTime.fromJSDate(parsedDate, { zone: timezone });
 
   // Validate date is in the future (with 1 minute buffer for processing time)
   const nowInTargetTz = DateTime.now().setZone(timezone);

@@ -1,9 +1,10 @@
 import { GoogleGenerativeAI, Part, Content } from "@google/generative-ai";
 import logger from "../utils/logger.js";
 import dotenv from "dotenv";
-import { AbstractAiService } from "./AbstractAiService.js";
+import { AbstractAiService, RequestContext } from "./AbstractAiService.js";
 import { availableFunctions } from "./AiTools.js";
 import { SYSTEM_PROMPT } from "./AiPrompts.js";
+import { TTLMap } from "../utils/TTLMap.js";
 
 dotenv.config();
 
@@ -13,7 +14,7 @@ const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 export class GeminiAiService extends AbstractAiService {
   private genAI: GoogleGenerativeAI;
   private model: any;
-  private chatSessions: Map<string, any> = new Map(); // userId -> ChatSession
+  private chatSessions: TTLMap<string, any>; // TTL-based map for auto-expiring sessions
 
   constructor() {
     super();
@@ -21,6 +22,9 @@ export class GeminiAiService extends AbstractAiService {
       throw new Error("GEMINI_API_KEY not defined in .env");
     }
     this.genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+    
+    // Initialize with 10-minute TTL
+    this.chatSessions = new TTLMap<string, any>(10 * 60 * 1000);
     
     // transform OpenAI tools to Gemini tools
     const excludeAdditionalProperties = (obj: any): any => {
@@ -60,9 +64,13 @@ export class GeminiAiService extends AbstractAiService {
     text = this.cleanTextMessage(text);
     logger.info(`Gemini processing text from user ${userId}: "${text}"`);
 
-    if (senderId) this.senderIds.set(userId, senderId);
-    if (mentionedJids) this.mentionedJids.set(userId, mentionedJids);
-    if (rawText) this.rawTexts.set(userId, rawText);
+    // Create request context
+    const ctx: RequestContext = {
+      chatId: userId,
+      senderId: senderId || "system",
+      mentionedJids: mentionedJids || [],
+      rawText: rawText || text,
+    };
 
     try {
       let chat = this.chatSessions.get(userId);
@@ -97,8 +105,8 @@ export class GeminiAiService extends AbstractAiService {
           let functionResponseString: string;
 
           if (functionHandler) {
-             // arguments from Gemini are objects, checking compatibility
-            functionResponseString = await functionHandler(functionArgs, userId);
+             // Pass context instead of just chatId
+            functionResponseString = await functionHandler(functionArgs, ctx);
           } else {
             functionResponseString = JSON.stringify({
               success: false,
@@ -160,35 +168,5 @@ export class GeminiAiService extends AbstractAiService {
   public clearAllHistories(): void {
     this.chatSessions.clear();
     logger.info("Cleared all conversation histories");
-  }
-
-  private extractMentions(functionResponse: string, collectedMentions: Set<string>) {
-      try {
-        const responseData = JSON.parse(functionResponse);
-        if (responseData.success) {
-            if (responseData.details?.assigned_to && Array.isArray(responseData.details.assigned_to)) {
-                responseData.details.assigned_to.forEach((jid: string) => { if (jid) collectedMentions.add(jid); });
-            }
-            if (responseData.details?.mentions && Array.isArray(responseData.details.mentions)) {
-                responseData.details.mentions.forEach((jid: string) => { if (jid) collectedMentions.add(jid); });
-            }
-            if (responseData.tasks && Array.isArray(responseData.tasks)) {
-                responseData.tasks.forEach((task: any) => {
-                    if (task.assigned_to && Array.isArray(task.assigned_to)) {
-                        task.assigned_to.forEach((jid: string) => { if (jid) collectedMentions.add(jid); });
-                    }
-                });
-            }
-            if (responseData.reminders && Array.isArray(responseData.reminders)) {
-                responseData.reminders.forEach((reminder: any) => {
-                    if (reminder.mentions && Array.isArray(reminder.mentions)) {
-                        reminder.mentions.forEach((jid: string) => { if (jid) collectedMentions.add(jid); });
-                    }
-                });
-            }
-        }
-      } catch (e) {
-          logger.debug("Could not parse function response for mentions", e);
-      }
   }
 }

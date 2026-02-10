@@ -5,6 +5,17 @@ import { taskService } from "./TaskService.js";
 import { parseDateTime } from "../utils/DateParser.js";
 import { TaskStatus } from "../generated/prisma/client.js";
 
+/**
+ * Request context passed to all function handlers
+ * Fixes race condition by passing context directly instead of storing in shared maps
+ */
+export interface RequestContext {
+  chatId: string;
+  senderId: string;
+  mentionedJids: string[];
+  rawText: string;
+}
+
 interface ReminderParams {
   message: string;
   datetime: string;
@@ -54,12 +65,9 @@ interface CreateBulkTasksParams {
 }
 
 export abstract class AbstractAiService implements IAiService {
-    protected senderIds: Map<string, string> = new Map();
-    protected mentionedJids: Map<string, string[]> = new Map();
-    protected rawTexts: Map<string, string> = new Map();
     protected functionHandlers: Map<
         string,
-        (args: any, chatId: string) => Promise<string>
+        (args: any, ctx: RequestContext) => Promise<string>
     >;
 
     constructor() {
@@ -92,15 +100,15 @@ export abstract class AbstractAiService implements IAiService {
 
     // --- Tool Implementations (Copied from AiService.ts) ---
 
-    protected async handleCreateReminder(args: ReminderParams, chatId: string): Promise<string> {
+    protected async handleCreateReminder(args: ReminderParams, ctx: RequestContext): Promise<string> {
         try {
-            logger.info(`Creating reminder in chat ${chatId}:`, args);
+            logger.info(`Creating reminder in chat ${ctx.chatId}:`, args);
             const scheduledTime = parseDateTime(args.datetime);
-            const senderId = this.senderIds.get(chatId) || "system";
-            const contextMentions = this.mentionedJids.get(chatId) || [];
+            const senderId = ctx.senderId || "system";
+            const contextMentions = ctx.mentionedJids || [];
 
             const reminder = await reminderService.createReminder(
-                chatId,
+                ctx.chatId,
                 args.message,
                 scheduledTime.utc,
                 contextMentions,
@@ -135,10 +143,10 @@ export abstract class AbstractAiService implements IAiService {
         }
     }
 
-    protected async handleListReminders(args: ListRemindersParams, chatId: string): Promise<string> {
+    protected async handleListReminders(args: ListRemindersParams, ctx: RequestContext): Promise<string> {
         try {
-            logger.info(`Listing reminders for chat ${chatId}:`, args);
-            const reminders = await reminderService.listReminders(chatId, args.status || "active");
+            logger.info(`Listing reminders for chat ${ctx.chatId}:`, args);
+            const reminders = await reminderService.listReminders(ctx.chatId, args.status || "active");
 
             if (reminders.length === 0) {
                 return JSON.stringify({
@@ -173,10 +181,10 @@ export abstract class AbstractAiService implements IAiService {
         }
     }
 
-    protected async handleCancelReminder(args: CancelReminderParams, chatId: string): Promise<string> {
+    protected async handleCancelReminder(args: CancelReminderParams, ctx: RequestContext): Promise<string> {
         try {
-            logger.info(`Canceling reminder ${args.reminder_number} in chat ${chatId}`);
-            const reminder = await reminderService.getReminderByNumber(args.reminder_number, chatId);
+            logger.info(`Canceling reminder ${args.reminder_number} in chat ${ctx.chatId}`);
+            const reminder = await reminderService.getReminderByNumber(args.reminder_number, ctx.chatId);
 
             if (!reminder) {
                 return JSON.stringify({
@@ -209,9 +217,9 @@ export abstract class AbstractAiService implements IAiService {
         }
     }
 
-    protected async handleUpdateReminder(args: UpdateReminderParams, chatId: string): Promise<string> {
+    protected async handleUpdateReminder(args: UpdateReminderParams, ctx: RequestContext): Promise<string> {
         try {
-            logger.info(`Updating reminder ${args.reminder_number} in chat ${chatId}:`, args);
+            logger.info(`Updating reminder ${args.reminder_number} in chat ${ctx.chatId}:`, args);
             if (!args.message && !args.datetime) {
                 return JSON.stringify({
                     success: false,
@@ -219,7 +227,7 @@ export abstract class AbstractAiService implements IAiService {
                 });
             }
 
-            const reminder = await reminderService.getReminderByNumber(args.reminder_number, chatId);
+            const reminder = await reminderService.getReminderByNumber(args.reminder_number, ctx.chatId);
             if (!reminder) {
                 return JSON.stringify({
                     success: false,
@@ -266,12 +274,12 @@ export abstract class AbstractAiService implements IAiService {
         }
     }
 
-    protected async handleCreateTask(args: CreateTaskParams, chatId: string): Promise<string> {
+    protected async handleCreateTask(args: CreateTaskParams, ctx: RequestContext): Promise<string> {
         try {
-            logger.info(`Creating task in chat ${chatId}:`, args);
+            logger.info(`Creating task in chat ${ctx.chatId}:`, args);
             let assignedTo: string | undefined = undefined;
-            const senderId = this.senderIds.get(chatId);
-            const mentions = this.mentionedJids.get(chatId) || [];
+            const senderId = ctx.senderId;
+            const mentions = ctx.mentionedJids || [];
 
             if (args.assign_to_sender) {
                 if (senderId) assignedTo = senderId;
@@ -282,7 +290,7 @@ export abstract class AbstractAiService implements IAiService {
             }
 
             const task = await taskService.createTask({
-                chatId,
+                chatId: ctx.chatId,
                 title: args.title,
                 assignedTo: assignedTo ? [assignedTo] : [],
             });
@@ -312,14 +320,14 @@ export abstract class AbstractAiService implements IAiService {
         }
     }
 
-    protected async handleListTasks(args: ListTasksParams, chatId: string): Promise<string> {
+    protected async handleListTasks(args: ListTasksParams, ctx: RequestContext): Promise<string> {
         try {
-            logger.info(`Listing tasks for chat ${chatId}:`, args);
+            logger.info(`Listing tasks for chat ${ctx.chatId}:`, args);
             const status = args.status === "all" ? undefined : (args.status as TaskStatus);
             
             let assignedTo: string | undefined;
-            const senderId = this.senderIds.get(chatId);
-            const mentionedJids = this.mentionedJids.get(chatId) || [];
+            const senderId = ctx.senderId;
+            const mentionedJids = ctx.mentionedJids || [];
 
             if (args.assign_to_sender) {
                 if (senderId) assignedTo = senderId;
@@ -329,10 +337,10 @@ export abstract class AbstractAiService implements IAiService {
                  }
             }
 
-            const tasks = await taskService.listTasks(chatId, status, assignedTo);
+            const tasks = await taskService.listTasks(ctx.chatId, status, assignedTo);
             
             // Also fetch recent closed tasks for context
-            let recentClosedTasks = await taskService.getRecentClosedTasks(chatId, 7);
+            let recentClosedTasks = await taskService.getRecentClosedTasks(ctx.chatId, 7);
             if (assignedTo) {
                 recentClosedTasks = recentClosedTasks.filter(t => t.assignedTo && t.assignedTo.includes(assignedTo));
             }
@@ -371,11 +379,11 @@ export abstract class AbstractAiService implements IAiService {
         }
     }
 
-    protected async handleUpdateTask(args: UpdateTaskParams, chatId: string): Promise<string> {
+    protected async handleUpdateTask(args: UpdateTaskParams, ctx: RequestContext): Promise<string> {
         try {
-            logger.info(`Updating task ${args.task_number} in chat ${chatId}:`, args);
+            logger.info(`Updating task ${args.task_number} in chat ${ctx.chatId}:`, args);
             const taskNumber = Number(args.task_number);
-            const task = await taskService.getTaskByNumber(taskNumber, chatId);
+            const task = await taskService.getTaskByNumber(taskNumber, ctx.chatId);
 
             if (!task) {
                 return JSON.stringify({
@@ -409,10 +417,10 @@ export abstract class AbstractAiService implements IAiService {
         }
     }
 
-    protected async handleDeleteTask(args: DeleteTaskParams, chatId: string): Promise<string> {
+    protected async handleDeleteTask(args: DeleteTaskParams, ctx: RequestContext): Promise<string> {
         try {
-            logger.info(`Deleting task ${args.task_number} in chat ${chatId}`);
-            const task = await taskService.getTaskByNumber(args.task_number, chatId);
+            logger.info(`Deleting task ${args.task_number} in chat ${ctx.chatId}`);
+            const task = await taskService.getTaskByNumber(args.task_number, ctx.chatId);
 
             if (!task) {
                 return JSON.stringify({
@@ -446,11 +454,12 @@ export abstract class AbstractAiService implements IAiService {
 
 
 
-    protected async handleCreateBulkTasks(args: CreateBulkTasksParams, chatId: string): Promise<string> {
+    protected async handleCreateBulkTasks(args: CreateBulkTasksParams, ctx: RequestContext): Promise<string> {
         try {
-            logger.info(`Creating bulk tasks in chat ${chatId}:`, args);
-            const mentionedJids = this.mentionedJids.get(chatId) || [];
-            const senderId = this.senderIds.get(chatId);
+            logger.info(`Creating bulk tasks in chat ${ctx.chatId}:`, args);
+            const senderId = ctx.senderId;
+            const mentionedJids = ctx.mentionedJids || [];
+            
             const createdTasks: Array<{ task_number: string; title: string; assigned_to: string[] }> = [];
             const errors: string[] = [];
 
@@ -484,7 +493,7 @@ export abstract class AbstractAiService implements IAiService {
 
                     try {
                         const task = await taskService.createTask({
-                            chatId,
+                            chatId: ctx.chatId,
                             senderId: senderId || undefined,
                             title: cleanedTitle,
                             assignedTo: [assignedToJid],
@@ -557,5 +566,39 @@ export abstract class AbstractAiService implements IAiService {
           .filter((line) => line.length > 0)
           .join("\n");
         return cleanText;
-      }
+    }
+
+    /**
+     * Extract mention JIDs from function response JSON
+     * Moved from provider services to avoid duplication
+     */
+    protected extractMentions(functionResponse: string, collectedMentions: Set<string>): void {
+        try {
+            const responseData = JSON.parse(functionResponse);
+            if (responseData.success) {
+                if (responseData.details?.assigned_to && Array.isArray(responseData.details.assigned_to)) {
+                    responseData.details.assigned_to.forEach((jid: string) => { if (jid) collectedMentions.add(jid); });
+                }
+                if (responseData.details?.mentions && Array.isArray(responseData.details.mentions)) {
+                    responseData.details.mentions.forEach((jid: string) => { if (jid) collectedMentions.add(jid); });
+                }
+                if (responseData.tasks && Array.isArray(responseData.tasks)) {
+                    responseData.tasks.forEach((task: any) => {
+                        if (task.assigned_to && Array.isArray(task.assigned_to)) {
+                            task.assigned_to.forEach((jid: string) => { if (jid) collectedMentions.add(jid); });
+                        }
+                    });
+                }
+                if (responseData.reminders && Array.isArray(responseData.reminders)) {
+                    responseData.reminders.forEach((reminder: any) => {
+                        if (reminder.mentions && Array.isArray(reminder.mentions)) {
+                            reminder.mentions.forEach((jid: string) => { if (jid) collectedMentions.add(jid); });
+                        }
+                    });
+                }
+            }
+        } catch (e) {
+            logger.debug("Could not parse function response for mentions", e);
+        }
+    }
 }
