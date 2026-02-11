@@ -24,6 +24,9 @@ import { RecentTasksCommand } from "../commands/RecentTasksCommand.js";
 import { RecentRemindersCommand } from "../commands/RecentRemindersCommand.js";
 import { ClearHistoryCommand } from "../commands/ClearHistoryCommand.js";
 import { TaskDigestCommand } from "../commands/TaskDigestCommand.js";
+import { DoneTaskCommand } from "../commands/DoneTaskCommand.js";
+import { QuickCancelReminderCommand } from "../commands/QuickCancelReminderCommand.js";
+import { SearchTasksCommand } from "../commands/SearchTasksCommand.js";
 import {
   MessageContent,
   BotIdentity,
@@ -63,6 +66,9 @@ export class WhatsappService {
     this.commandRegistry.register(new RecentRemindersCommand());
     this.commandRegistry.register(new TaskDigestCommand());
     this.commandRegistry.register(new ClearHistoryCommand());
+    this.commandRegistry.register(new DoneTaskCommand());
+    this.commandRegistry.register(new QuickCancelReminderCommand());
+    this.commandRegistry.register(new SearchTasksCommand());
   }
 
   /**

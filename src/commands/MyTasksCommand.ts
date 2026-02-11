@@ -7,7 +7,7 @@ import logger from "../utils/logger.js";
 
 export class MyTasksCommand implements Command {
   name = "tasks";
-  aliases = ["/tasks", "/task", "/t"];
+  aliases = ["/tasks", "/task", "/t", "/my-tasks"];
 
   async execute(context: MessageContext, services: ServiceContainer): Promise<void> {
     logger.info(

@@ -149,6 +149,57 @@ export class TaskService {
   }
 
   /**
+   * Search tasks by keyword in title
+   */
+  async searchTasks(
+    chatId: string,
+    query: string,
+    options?: {
+     status?: TaskStatus;
+      assignedTo?: string;
+      limit?: number;
+    }
+  ): Promise<TaskDto[]> {
+    try {
+      const tasks = await prisma.tasks.findMany({
+        where: {
+          chatId,
+          title: {
+            contains: query,
+            mode: 'insensitive',
+          },
+          ...(options?.status && { status: options.status }),
+          ...(options?.assignedTo && {
+            assignedTo: {
+              has: options.assignedTo,
+            },
+          }),
+        },
+        orderBy: [
+          { status: 'asc' },
+          { updatedAt: 'desc' },
+        ],
+        take: options?.limit || 20,
+      });
+
+      logger.info("Searched tasks", {
+        chatId,
+        query,
+        resultsCount: tasks.length,
+      });
+
+      return tasks.map(this.toTaskDto);
+    } catch (error) {
+      logger.error("Failed to search tasks", {
+        error: error instanceof Error ? error.message : String(error),
+        chatId,
+        query,
+      });
+      return [];
+    }
+  }
+
+  /**
    * Update a task
    */
   async updateTask(taskId: string, input: UpdateTaskInput): Promise<TaskDto> {

@@ -9,15 +9,18 @@ export class HelpCommand implements Command {
     const message = `*GiGi Commands*
 
 *Task Commands:*
-• \`/tasks\` - Your active tasks
+• \`/tasks\` or \`/my-tasks\` - Your active tasks
 • \`/all-tasks\` - All group tasks
+• \`/search keyword\` - Search tasks by keyword
 • \`/recent-tasks\` - Recently closed tasks
 • \`/task-digest\` - Manual task digest
+• \`/done T1\` - Quick: Mark task as done
 
 *Reminder Commands:*
 • \`/reminders\` or \`/meetings\` - Your active reminders
 • \`/all-reminders\` or \`/all-meetings\` - All group reminders
 • \`/recent-reminders\` or \`/recent-meetings\` - Recently completed reminders
+• \`/cancel R1\` - Quick: Cancel reminder
 
 *Other:*
 • \`/help\` - Show this message

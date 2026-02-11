@@ -4,6 +4,7 @@ import { reminderService } from "./ReminderService.js";
 import { taskService } from "./TaskService.js";
 import { parseDateTime } from "../utils/DateParser.js";
 import { TaskStatus } from "../generated/prisma/client.js";
+import { cleanJidForDisplay } from "../utils/jidUtils.js";
 
 /**
  * Request context passed to all function handlers
@@ -96,6 +97,7 @@ export abstract class AbstractAiService implements IAiService {
         this.functionHandlers.set("update_task", this.handleUpdateTask.bind(this));
         this.functionHandlers.set("delete_task", this.handleDeleteTask.bind(this));
         this.functionHandlers.set("create_bulk_tasks", this.handleCreateBulkTasks.bind(this));
+        this.functionHandlers.set("search_tasks", this.handleSearchTasks.bind(this));
     }
 
     // --- Tool Implementations (Copied from AiService.ts) ---
@@ -551,6 +553,70 @@ export abstract class AbstractAiService implements IAiService {
             return JSON.stringify({
                 success: false,
                 error: "Failed to create bulk tasks: " + error.message,
+            });
+        }
+    }
+    
+    protected async handleSearchTasks(
+        args: {
+            query: string;
+            status?: TaskStatus;
+            assigned_to_sender?: boolean;
+        },
+        ctx: RequestContext
+    ): Promise<string> {
+        try {
+            logger.info(`Searching tasks for "${args.query}" in chat ${ctx.chatId}`);
+            
+            const results = await taskService.searchTasks(ctx.chatId, args.query, {
+                status: args.status,
+                assignedTo: args.assigned_to_sender ? ctx.senderId : undefined,
+                limit: 15,
+            });
+
+            if (results.length === 0) {
+                return JSON.stringify({
+                    success: true,
+                    count: 0,
+                    message: `No tasks found matching "${args.query}"`,
+                });
+            }
+
+            // Group by assignee
+            const byUser = new Map<string, typeof results>();
+            for (const task of results) {
+                if (task.assignedTo && task.assignedTo.length > 0) {
+                    for (const userId of task.assignedTo) {
+                        const tasks = byUser.get(userId) || [];
+                        tasks.push(task);
+                        byUser.set(userId, tasks);
+                    }
+                }
+            }
+
+            let message = `🔍 Found *${results.length}* task(s) for "*${args.query}*"\n\n`;
+
+            for (const [userId, tasks] of byUser) {
+                message += `> @${cleanJidForDisplay(userId)}\n`;
+                for (const task of tasks) {
+                    const emoji = taskService.getStatusEmoji(task.status);
+                    const taskNumber = taskService.formatTaskId(task.taskId);
+                    message += `* *${taskNumber}* - ${task.title} ${emoji}\n`;
+                }
+                message += '\n';
+            }
+
+            return JSON.stringify({
+                success: true,
+                count: results.length,
+                message,
+                mentions: Array.from(byUser.keys()),
+            });
+        } catch (error: any) {
+            logger.error("Error searching tasks:", error);
+            return JSON.stringify({
+                success: false,
+                error: "Failed to search tasks: " + error.message,
             });
         }
     }

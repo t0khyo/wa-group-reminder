@@ -226,4 +226,32 @@ export const availableFunctions: any[] = [
       additionalProperties: false,
     },
   },
+  {
+    type: "function",
+    name: "search_tasks",
+    description:
+      "Search for tasks by keyword in their titles. " +
+      "Use when user asks to 'find', 'search', or 'show tasks about' something. " +
+      "Returns matching tasks grouped by assignee with status emojis.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Keyword or phrase to search for in task titles",
+        },
+        status: {
+          type: "string",
+          enum: ["Pending", "InProgress", "Done", "Cancelled"],
+          description: "Optional: Filter by specific status",
+        },
+        assigned_to_sender: {
+          type: "boolean",
+          description: "If true, only search tasks assigned to the message sender",
+        },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+  },
 ];
