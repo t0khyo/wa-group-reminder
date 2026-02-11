@@ -8,9 +8,9 @@ echo "⏳ Waiting for database to be ready..."
 sleep 10
 echo "✅ Database is ready!"
 
-# Run database schema sync (skipped - will restore from backup)
-# echo "🔄 Running database migrations..."
-# npx prisma db push --accept-data-loss
+# Run database schema sync (using db push for development/docker flexibility)
+echo "🔄 Syncing database schema..."
+npx prisma db push --accept-data-loss
 
 # Start the application
 echo "🤖 Starting WhatsApp bot..."

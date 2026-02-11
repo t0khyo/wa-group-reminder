@@ -17,5 +17,6 @@ export interface ServiceContainer {
 export interface Command {
   name: string;
   aliases: string[];
+  excludeFromHelp?: boolean; // Optional: hide from /help command
   execute(context: MessageContext, services: ServiceContainer): Promise<void>;
 }

@@ -56,3 +56,13 @@ model Tasks {
   @@map("tasks")
 }
 
+model GroupConfig {
+  id         String   @id @default(uuid())
+  chatId     String   @unique
+  botEnabled Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([chatId])
+  @@map("group_config")
+}

@@ -27,12 +27,16 @@ import { TaskDigestCommand } from "../commands/TaskDigestCommand.js";
 import { DoneTaskCommand } from "../commands/DoneTaskCommand.js";
 import { QuickCancelReminderCommand } from "../commands/QuickCancelReminderCommand.js";
 import { SearchTasksCommand } from "../commands/SearchTasksCommand.js";
+import { StartGigiCommand } from "../commands/StartGigiCommand.js";
+import { StopGigiCommand } from "../commands/StopGigiCommand.js";
+import { HealthCommand } from "../commands/HealthCommand.js";
 import {
   MessageContent,
   BotIdentity,
   MessageContext,
 } from "../types/index.js";
 import { cleanJidForDisplay } from "../utils/jidUtils.js";
+import { groupConfigService } from "../service/GroupConfigService.js";
 
 
 
@@ -69,6 +73,9 @@ export class WhatsappService {
     this.commandRegistry.register(new DoneTaskCommand());
     this.commandRegistry.register(new QuickCancelReminderCommand());
     this.commandRegistry.register(new SearchTasksCommand());
+    this.commandRegistry.register(new StartGigiCommand());
+    this.commandRegistry.register(new StopGigiCommand());
+    this.commandRegistry.register(new HealthCommand());
   }
 
   /**
@@ -318,6 +325,28 @@ export class WhatsappService {
 
     // Check if bot is mentioned or replied to
     const isMentioned = this.isBotMentioned(msg);
+
+    // Define exempt commands (always work, even when bot is disabled)
+    const EXEMPT_COMMANDS = [
+      '/start-gigi', '/enable-gigi', '/gigi-on',
+      '/stop-gigi', '/disable-gigi', '/gigi-off',
+      '/health', '/status'
+    ];
+
+    // Check if this is a command and if it's exempt
+    const isCommand = context.text.startsWith('/');
+    const commandName = isCommand ? context.text.split(' ')[0].toLowerCase() : null;
+    const isExemptCommand = commandName && EXEMPT_COMMANDS.includes(commandName);
+
+    // Check if bot is enabled in this group (skip for exempt commands)
+    if (!isExemptCommand) {
+      const botEnabled = await groupConfigService.isBotEnabled(context.chatId);
+      
+      if (!botEnabled) {
+        logger.info(`Bot disabled in ${context.chatId}, ignoring message`);
+        return; // Silently ignore message
+      }
+    }
 
     // Handle ping command (works without mention)
     if (context.text.includes("/ping")) {

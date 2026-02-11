@@ -10,6 +10,7 @@ ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy?schema=public"
 # Copy package files
 COPY package*.json ./
 COPY prisma ./prisma/
+COPY prisma.config.ts ./
 
 # Install all dependencies (including dev dependencies for build)
 RUN npm ci
@@ -34,6 +35,7 @@ RUN apk add --no-cache dumb-init
 # Copy package files
 COPY package*.json ./
 COPY prisma ./prisma/
+COPY prisma.config.ts ./
 
 # Install only production dependencies
 RUN npm ci --only=production

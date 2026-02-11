@@ -10,6 +10,9 @@ export class HelpCommand implements Command {
 
 *Task Commands:*
 • \`/tasks\` or \`/my-tasks\` - Your active tasks
+• \`/tasks pending\` - Active tasks (pending + in-progress)
+• \`/tasks done\` - Completed tasks
+• \`/tasks cancelled\` - Cancelled tasks
 • \`/all-tasks\` - All group tasks
 • \`/search keyword\` - Search tasks by keyword
 • \`/recent-tasks\` - Recently closed tasks
@@ -24,13 +27,17 @@ export class HelpCommand implements Command {
 
 *Other:*
 • \`/help\` - Show this message
+• \`/clear-history\` - Clear your AI conversation history
 
 💬 *Chat naturally by mentioning me to:*
 • Create tasks & reminders
 • Update task status
 • List & manage tasks
 
-📌 Mention users to assign tasks or say "assign me"`;
+📌 Mention users to assign tasks or say "assign me"
+
+_I'm GiGi, your group assistant! Mention me (@GiGi) to chat or create tasks/reminders._
+`;
 
     await services.whatsapp.sendMessage(context.chatId, {
       text: message,

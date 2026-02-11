@@ -10,8 +10,16 @@ export class MyTasksCommand implements Command {
   aliases = ["/tasks", "/task", "/t", "/my-tasks"];
 
   async execute(context: MessageContext, services: ServiceContainer): Promise<void> {
+    // Parse status filter from command
+    // /tasks pending → shows Pending + InProgress
+    // /tasks done → shows Done only
+    // /tasks cancelled → shows Cancelled only
+    // /tasks → default behavior (active + recent closed)
+    const args = context.text.trim().split(/\s+/);
+    const statusFilter = args.length > 1 ? args[1].toLowerCase() : null;
+
     logger.info(
-      `Fetching tasks for sender: ${context.senderId} in chat: ${context.chatId}`
+      `Fetching tasks for sender: ${context.senderId} in chat: ${context.chatId}, filter: ${statusFilter || 'default'}`
     );
 
     const myTasks = await taskService.getTasksAssignedTo(
@@ -22,17 +30,96 @@ export class MyTasksCommand implements Command {
     logger.info(
       `Found ${myTasks.length} total tasks assigned to ${context.senderId}`
     );
-    logger.info(
-      `Tasks: ${JSON.stringify(
-        myTasks.map((t) => ({
-          id: t.taskId,
-          title: t.title,
-          status: t.status,
-          assignedTo: t.assignedTo,
-        }))
-      )}`
-    );
 
+    let filteredTasks;
+    let messageHeader = `> @${cleanJidForDisplay(context.senderId)}\n\n`;
+
+    // Apply status filter
+    if (statusFilter === 'pending') {
+      // Show pending AND in-progress
+      filteredTasks = myTasks.filter(
+        (t) => t.status === TaskStatus.Pending || t.status === TaskStatus.InProgress
+      );
+      messageHeader += `You have *${filteredTasks.length}* active task(s):\n\n`;
+      
+      if (filteredTasks.length === 0) {
+        await services.whatsapp.sendMessage(context.chatId, {
+          text: messageHeader + 'No active tasks! 🎉',
+          mentions: [context.senderId],
+        });
+        return;
+      }
+
+      for (const task of filteredTasks) {
+        const emoji = taskService.getStatusEmoji(task.status);
+        const taskNumber = taskService.formatTaskId(task.taskId);
+        messageHeader += `* *${taskNumber}* - ${task.title} ${emoji}\n`;
+      }
+
+      await services.whatsapp.sendMessage(context.chatId, {
+        text: messageHeader,
+        mentions: [context.senderId],
+      });
+      return;
+    }
+
+    if (statusFilter === 'done') {
+      filteredTasks = myTasks.filter((t) => t.status === TaskStatus.Done);
+      messageHeader += `You have *${filteredTasks.length}* completed task(s):\n\n`;
+
+      if (filteredTasks.length === 0) {
+        await services.whatsapp.sendMessage(context.chatId, {
+          text: messageHeader + 'No completed tasks.',
+          mentions: [context.senderId],
+        });
+        return;
+      }
+
+      // Sort by most recent first
+      filteredTasks.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+
+      for (const task of filteredTasks) {
+        const emoji = taskService.getStatusEmoji(task.status);
+        const taskNumber = taskService.formatTaskId(task.taskId);
+        messageHeader += `* *${taskNumber}* - ${task.title} ${emoji}\n`;
+      }
+
+      await services.whatsapp.sendMessage(context.chatId, {
+        text: messageHeader,
+        mentions: [context.senderId],
+      });
+      return;
+    }
+
+    if (statusFilter === 'cancelled') {
+      filteredTasks = myTasks.filter((t) => t.status === TaskStatus.Cancelled);
+      messageHeader += `You have *${filteredTasks.length}* cancelled task(s):\n\n`;
+
+      if (filteredTasks.length === 0) {
+        await services.whatsapp.sendMessage(context.chatId, {
+          text: messageHeader + 'No cancelled tasks.',
+          mentions: [context.senderId],
+        });
+        return;
+      }
+
+      // Sort by most recent first
+      filteredTasks.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+
+      for (const task of filteredTasks) {
+        const emoji = taskService.getStatusEmoji(task.status);
+        const taskNumber = taskService.formatTaskId(task.taskId);
+        messageHeader += `* *${taskNumber}* - ${task.title} ${emoji}\n`;
+      }
+
+      await services.whatsapp.sendMessage(context.chatId, {
+        text: messageHeader,
+        mentions: [context.senderId],
+      });
+      return;
+    }
+
+    // Default behavior (no filter or unrecognized filter)
     const activeTasks = myTasks.filter(
       (t) =>
         t.status === TaskStatus.Pending || t.status === TaskStatus.InProgress
@@ -53,8 +140,7 @@ export class MyTasksCommand implements Command {
       `Filtered to ${activeTasks.length} active tasks and ${recentClosedTasks.length} recent closed tasks`
     );
 
-    const cleanSender = cleanJidForDisplay(context.senderId);
-    let message = `> @${cleanSender}\n\n`;
+    let message = `> @${cleanJidForDisplay(context.senderId)}\n\n`;
 
     if (activeTasks.length === 0 && recentClosedTasks.length === 0) {
       message += `You have no active or recent tasks! 🎉`;
