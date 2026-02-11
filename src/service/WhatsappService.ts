@@ -395,35 +395,51 @@ export class WhatsappService {
   }
 
   /**
-   * Handle slash commands for testing and development
+   * Handle slash commands with smart partial matching and suggestions
    */
   private async handleCommand(context: MessageContext): Promise<boolean> {
     const commandName = context.text.split(" ")[0].toLowerCase();
 
     try {
-      // 1. Try Registry (Active)
-      const regCmd = this.commandRegistry.get(commandName);
-      if (regCmd) {
-        await regCmd.execute(context, {
+      // 1. Try exact match first
+      const exactCmd = this.commandRegistry.get(commandName);
+      if (exactCmd) {
+        await exactCmd.execute(context, {
           whatsapp: this,
           registry: this.commandRegistry,
         });
         return true;
       }
 
-      // 2. Fuzzy matching via Registry
-      const matchedCommand = this.commandRegistry.findSimilar(commandName);
-      if (matchedCommand) {
-        const regCmd = this.commandRegistry.get(matchedCommand);
-        if (regCmd) {
-          await regCmd.execute(context, {
+      // 2. Try partial matching with smart suggestions
+      const matchResult = this.commandRegistry.findBestMatch(commandName);
+      
+      if (matchResult.type === 'unique') {
+        // Single match - auto-execute (like bash tab completion)
+        const cmd = this.commandRegistry.get(matchResult.matches[0]);
+        if (cmd) {
+          logger.info(`Auto-completed "${commandName}" to "${matchResult.matches[0]}"`);
+          await cmd.execute(context, {
             whatsapp: this,
             registry: this.commandRegistry,
           });
           return true;
         }
       }
+      
+      if (matchResult.type === 'ambiguous') {
+        // Multiple matches - show suggestions
+        const suggestions = matchResult.matches
+          .map(name => `\`/${name}\``)
+          .join(', ');
+        
+        await this.sendMessage(context.chatId, {
+          text: `❓ Did you mean: ${suggestions}?`,
+        });
+        return true; // Handled (showed suggestion)
+      }
 
+      // No matches found - let it fall through
       return false;
     } catch (error) {
       logger.error("Command execution failed", {
