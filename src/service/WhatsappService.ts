@@ -30,15 +30,9 @@ import { SearchTasksCommand } from "../commands/SearchTasksCommand.js";
 import { StartGigiCommand } from "../commands/StartGigiCommand.js";
 import { StopGigiCommand } from "../commands/StopGigiCommand.js";
 import { HealthCommand } from "../commands/HealthCommand.js";
-import {
-  MessageContent,
-  BotIdentity,
-  MessageContext,
-} from "../types/index.js";
+import { MessageContent, BotIdentity, MessageContext } from "../types/index.js";
 import { cleanJidForDisplay } from "../utils/jidUtils.js";
 import { groupConfigService } from "../service/GroupConfigService.js";
-
-
 
 export class WhatsappService {
   private socket: WASocket | null = null;
@@ -92,6 +86,7 @@ export class WhatsappService {
       this.socket = makeWASocket({
         auth: state,
         printQRInTerminal: false, // We handle QR display manually
+        version: [2, 3000, 1033893291],
         defaultQueryTimeoutMs: 60000,
         browser: Browsers.macOS("Safari"),
         connectTimeoutMs: 60000,
@@ -130,7 +125,7 @@ export class WhatsappService {
     // Handle connection state changes
     this.socket.ev.on(
       "connection.update",
-      this.handleConnectionUpdate.bind(this)
+      this.handleConnectionUpdate.bind(this),
     );
 
     // Handle incoming messages
@@ -183,7 +178,7 @@ export class WhatsappService {
       logger.info("QR code generated for WhatsApp pairing");
       qrcode.generate(qr, { small: true });
       console.log(
-        "\nGo to: WhatsApp → Settings → Linked Devices → Link a Device\n"
+        "\nGo to: WhatsApp → Settings → Linked Devices → Link a Device\n",
       );
     }
 
@@ -317,7 +312,7 @@ export class WhatsappService {
       senderId: context.senderId,
       isGroup: context.isGroup,
       hasQuote: !!context.quotedMessage,
-      text: context.text // Log the input text
+      text: context.text, // Log the input text
     });
 
     // Check if this is a reply to bot's message
@@ -328,20 +323,28 @@ export class WhatsappService {
 
     // Define exempt commands (always work, even when bot is disabled)
     const EXEMPT_COMMANDS = [
-      '/start-gigi', '/enable-gigi', '/gigi-on',
-      '/stop-gigi', '/disable-gigi', '/gigi-off',
-      '/health', '/status'
+      "/start-gigi",
+      "/enable-gigi",
+      "/gigi-on",
+      "/stop-gigi",
+      "/disable-gigi",
+      "/gigi-off",
+      "/health",
+      "/status",
     ];
 
     // Check if this is a command and if it's exempt
-    const isCommand = context.text.startsWith('/');
-    const commandName = isCommand ? context.text.split(' ')[0].toLowerCase() : null;
-    const isExemptCommand = commandName && EXEMPT_COMMANDS.includes(commandName);
+    const isCommand = context.text.startsWith("/");
+    const commandName = isCommand
+      ? context.text.split(" ")[0].toLowerCase()
+      : null;
+    const isExemptCommand =
+      commandName && EXEMPT_COMMANDS.includes(commandName);
 
     // Check if bot is enabled in this group (skip for exempt commands)
     if (!isExemptCommand) {
       const botEnabled = await groupConfigService.isBotEnabled(context.chatId);
-      
+
       if (!botEnabled) {
         logger.info(`Bot disabled in ${context.chatId}, ignoring message`);
         return; // Silently ignore message
@@ -390,7 +393,7 @@ export class WhatsappService {
         context.chatId,
         context.senderId,
         context.mentionedJids,
-        context.rawText
+        context.rawText,
       );
 
       // Send reply with mentions if provided
@@ -403,7 +406,7 @@ export class WhatsappService {
         chatId: context.chatId,
         senderId: context.senderId,
         hasMentions: !!reply.mentions && reply.mentions.length > 0,
-        reply: reply.text
+        reply: reply.text,
       });
     } catch (error) {
       logger.error("Failed to generate AI reply", {
@@ -442,12 +445,14 @@ export class WhatsappService {
 
       // 2. Try partial matching with smart suggestions
       const matchResult = this.commandRegistry.findBestMatch(commandName);
-      
-      if (matchResult.type === 'unique') {
+
+      if (matchResult.type === "unique") {
         // Single match - auto-execute (like bash tab completion)
         const cmd = this.commandRegistry.get(matchResult.matches[0]);
         if (cmd) {
-          logger.info(`Auto-completed "${commandName}" to "${matchResult.matches[0]}"`);
+          logger.info(
+            `Auto-completed "${commandName}" to "${matchResult.matches[0]}"`,
+          );
           await cmd.execute(context, {
             whatsapp: this,
             registry: this.commandRegistry,
@@ -455,13 +460,13 @@ export class WhatsappService {
           return true;
         }
       }
-      
-      if (matchResult.type === 'ambiguous') {
+
+      if (matchResult.type === "ambiguous") {
         // Multiple matches - show suggestions
         const suggestions = matchResult.matches
-          .map(name => `\`/${name}\``)
-          .join(', ');
-        
+          .map((name) => `\`/${name}\``)
+          .join(", ");
+
         await this.sendMessage(context.chatId, {
           text: `❓ Did you mean: ${suggestions}?`,
         });
@@ -484,7 +489,6 @@ export class WhatsappService {
       return true;
     }
   }
-
 
   /**
    * Extract message context and metadata
@@ -526,15 +530,15 @@ export class WhatsappService {
       msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
 
     const mentionedJids = allMentionedJids.filter(
-      (jid) => jid !== this.botIdentity.jid && jid !== this.botIdentity.lid
+      (jid) => jid !== this.botIdentity.jid && jid !== this.botIdentity.lid,
     );
 
     logger.info(
       `Extracted message context: chatId=${chatId}, senderId=${senderId}, isGroup=${isGroup}, quotedMessage=${
         quotedMessage ? JSON.stringify(quotedMessage) : "undefined"
       } text="${text}", mentionedJids=[${mentionedJids.join(
-        ", "
-      )}] (bot mentions filtered out)`
+        ", ",
+      )}] (bot mentions filtered out)`,
     );
 
     return {
@@ -662,7 +666,7 @@ export class WhatsappService {
     try {
       await this.socket.sendPresenceUpdate(
         isTyping ? "composing" : "paused",
-        chatId
+        chatId,
       );
     } catch (error) {
       logger.debug("Failed to send typing indicator:", error);
