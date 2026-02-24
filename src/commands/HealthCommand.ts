@@ -36,11 +36,11 @@ export class HealthCommand implements Command {
       const message = [
         "Gigi — Health Report",
         "",
-        `Bot       ${botStatusLine}`,
-        `Database  Connected 🟢`,
-        `Uptime    ${uptime}`,
-        `Node.js   ${process.version}`,
-        `Memory    ${memUsed}MB / ${memTotal}MB`,
+        `Bot: ${botStatusLine}`,
+        `Database: Connected 🟢`,
+        `Uptime: ${uptime}`,
+        `Node.js: ${process.version}`,
+        `Memory: ${memUsed}MB / ${memTotal}MB`,
       ].join("\n");
 
       await services.whatsapp.sendMessage(context.chatId, {
