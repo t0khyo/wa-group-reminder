@@ -8,11 +8,13 @@ export class HealthCommand implements Command {
   aliases = ["/health", "/status"];
   excludeFromHelp = true;
 
-  async execute(context: MessageContext, services: ServiceContainer): Promise<void> {
+  async execute(
+    context: MessageContext,
+    services: ServiceContainer,
+  ): Promise<void> {
     try {
       // Check database connection
       await prisma.$queryRaw`SELECT 1`;
-      const dbStatus = "✅ Connected";
 
       // Get uptime (if process started timestamp is available)
       const uptimeSeconds = process.uptime();
@@ -21,19 +23,25 @@ export class HealthCommand implements Command {
       const uptime = `${uptimeHours}h ${uptimeMinutes}m`;
 
       // Get bot enabled status
-      const { groupConfigService } = await import("../service/GroupConfigService.js");
+      const { groupConfigService } =
+        await import("../service/GroupConfigService.js");
       const botEnabled = await groupConfigService.isBotEnabled(context.chatId);
-      const botStatus = botEnabled ? "🟢 Enabled" : "🔴 Disabled";
 
-      const message = `*🤖 Gigi Health Status*
+      const memUsed = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
+      const memTotal = Math.round(
+        process.memoryUsage().heapTotal / 1024 / 1024,
+      );
+      const botStatusLine = botEnabled ? `Enabled 🟢` : `Disabled 🔴`;
 
-*Bot Status:* ${botStatus}
-*Database:* ${dbStatus}
-*Uptime:* ${uptime}
-*Node.js:* ${process.version}
-*Memory:* ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB / ${Math.round(process.memoryUsage().heapTotal / 1024 / 1024)}MB
-
-_All systems operational_ ✨`;
+      const message = [
+        "Gigi — Health Report",
+        "",
+        `Bot       ${botStatusLine}`,
+        `Database  Connected 🟢`,
+        `Uptime    ${uptime}`,
+        `Node.js   ${process.version}`,
+        `Memory    ${memUsed}MB / ${memTotal}MB`,
+      ].join("\n");
 
       await services.whatsapp.sendMessage(context.chatId, {
         text: message,
