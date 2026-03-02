@@ -49,9 +49,6 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-gigi_db}
-    # Port mapping commented out for security (app connects internally)
-    # Uncomment only if you need external database access (e.g., from pgAdmin/TablePlus)
-    # If you enable this, make sure to set a strong POSTGRES_PASSWORD in .env
     # ports:
     #   - "${DB_PORT:-5437}:5432"
     volumes:
