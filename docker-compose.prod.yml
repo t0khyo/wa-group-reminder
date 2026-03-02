@@ -4,39 +4,30 @@ services:
     container_name: gigi-wa-bot
     restart: unless-stopped
     environment:
-      # Database - Dokploy managed PostgreSQL
       DATABASE_URL: ${DATABASE_URL}
-
-      # AI Provider
       AI_PROVIDER: ${AI_PROVIDER:-gemini}
-
-      # OpenAI (optional)
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       AI_MODEL: ${AI_MODEL:-gpt-5-nano}
-
-      # Gemini (optional)
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
-
-      # Timezone
       TZ: Asia/Kuwait
-
-      # Logging
       LOG_LEVEL: ${LOG_LEVEL:-info}
-
-      # Environment
       NODE_ENV: production
     volumes:
-      # Persist WhatsApp authentication data
       - auth-data:/app/auth_info
-      # Persist logs
       - logs-data:/app/logs
+    networks:
+      - dokploy-network
     healthcheck:
       test: [ "CMD", "node", "-e", "process.exit(0)" ]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 60s
+
+networks:
+  dokploy-network:
+    external: true
 
 volumes:
   auth-data:
