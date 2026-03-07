@@ -24,6 +24,7 @@ import { RecentTasksCommand } from "../commands/RecentTasksCommand.js";
 import { RecentRemindersCommand } from "../commands/RecentRemindersCommand.js";
 import { ClearHistoryCommand } from "../commands/ClearHistoryCommand.js";
 import { TaskDigestCommand } from "../commands/TaskDigestCommand.js";
+import { NewsCommand } from "../commands/NewsCommand.js";
 import { DoneTaskCommand } from "../commands/DoneTaskCommand.js";
 import { QuickCancelReminderCommand } from "../commands/QuickCancelReminderCommand.js";
 import { SearchTasksCommand } from "../commands/SearchTasksCommand.js";
@@ -63,6 +64,7 @@ export class WhatsappService {
     this.commandRegistry.register(new RecentTasksCommand());
     this.commandRegistry.register(new RecentRemindersCommand());
     this.commandRegistry.register(new TaskDigestCommand());
+    this.commandRegistry.register(new NewsCommand());
     this.commandRegistry.register(new ClearHistoryCommand());
     this.commandRegistry.register(new DoneTaskCommand());
     this.commandRegistry.register(new QuickCancelReminderCommand());
@@ -534,8 +536,7 @@ export class WhatsappService {
     );
 
     logger.info(
-      `Extracted message context: chatId=${chatId}, senderId=${senderId}, isGroup=${isGroup}, quotedMessage=${
-        quotedMessage ? JSON.stringify(quotedMessage) : "undefined"
+      `Extracted message context: chatId=${chatId}, senderId=${senderId}, isGroup=${isGroup}, quotedMessage=${quotedMessage ? JSON.stringify(quotedMessage) : "undefined"
       } text="${text}", mentionedJids=[${mentionedJids.join(
         ", ",
       )}] (bot mentions filtered out)`,

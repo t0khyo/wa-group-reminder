@@ -1,0 +1,159 @@
+# AI News Digest — Implementation Plan
+
+Add a daily automated AI news digest to the WhatsApp group bot. Every morning at 08:00 (configurable timezone), the bot fetches AI-related stories from Hacker News, summarises them with Gemini Flash 2.5, and posts a formatted digest. Users can also trigger an immediate digest via `/news`.
+
+## User Review Required
+
+> [!IMPORTANT]
+> **`NEWS_CHAT_IDS`** — You must add a new env var containing the comma-separated WhatsApp group JIDs that should receive the automated daily digest. Example: `NEWS_CHAT_IDS="120363xxxxxxx@g.us,120363yyyyyyy@g.us"`. Without this, the scheduled digest won't know which groups to post to. The `/news` command always replies to whichever chat it was sent in, no extra config needed.
+
+> [!NOTE]
+> The seen-article cache is **in-memory only** (not persisted to DB). It resets on bot restart. This keeps the implementation simple — on a fresh start the bot may re-surface articles from the previous day, but will deduplicate within the same runtime session. We can persist to DB in a follow-up if desired.
+
+---
+
+## Proposed Changes
+
+### New Service Layer
+
+#### [NEW] [NewsService.ts](file:///d:/dev/thegaminghub/wa-group-reminder/src/service/NewsService.ts)
+
+Responsible for fetching and filtering HN stories.
+
+- Calls `https://hacker-news.firebaseio.com/v0/topstories.json` to get top story IDs (first 30)
+- For each ID calls `https://hacker-news.firebaseio.com/v0/item/{id}.json` to get the story object
+- Filters by title using the keyword list from §7.3:
+  `AI, LLM, GPT, Claude, Gemini, OpenAI, Anthropic, machine learning, neural, model, agent, artificial intelligence, DeepSeek, Mistral`  
+  (case-insensitive, word-boundary match)
+- Returns up to 8 filtered candidates with `{ title, url, id }`
+- Maintains an in-memory `Set<string>` of seen article URLs; skips any URL already seen; trims to last 100
+
+#### [NEW] [NewsDigestService.ts](file:///d:/dev/thegaminghub/wa-group-reminder/src/service/NewsDigestService.ts)
+
+Responsible for AI summarisation and formatting.
+
+- Accepts the ≤8 candidate articles from `NewsService`
+- Builds a Gemini prompt instructing Gemini Flash 2.5 to:
+  - Select 3–5 most important stories
+  - Write a 2–3 sentence summary per story
+  - Append a one-liner "Thought of the day" about AI
+- Uses `@google/generative-ai` (already installed) — same `GEMINI_API_KEY` / `GEMINI_MODEL` env vars
+- Returns a pre-formatted WhatsApp markdown string matching the example output (bold `*`, italic `_`, emojis, numbered list, `🔗` links)
+- Returns `null` if Gemini call fails (caller skips silently)
+
+---
+
+### New Scheduler
+
+#### [NEW] [NewsScheduler.ts](file:///d:/dev/thegaminghub/wa-group-reminder/src/sheduler/NewsScheduler.ts)
+
+Follows the exact same pattern as [TaskScheduler.ts](file:///d:/dev/thegaminghub/wa-group-reminder/src/sheduler/TaskScheduler.ts).
+
+- Singleton export `newsScheduler`
+- [setWhatsappService(service)](file:///d:/dev/thegaminghub/wa-group-reminder/src/sheduler/ReminderScheduler.ts#10-17) function — called from [app.ts](file:///d:/dev/thegaminghub/wa-group-reminder/src/app.ts) after bot starts
+- [start()](file:///d:/dev/thegaminghub/wa-group-reminder/src/sheduler/TaskScheduler.ts#34-48) — schedules a `node-schedule` cron job at **08:00** daily using `DEFAULT_TIMEZONE`
+- [stop()](file:///d:/dev/thegaminghub/wa-group-reminder/src/sheduler/TaskScheduler.ts#49-67) — cancels the cron job
+- Internal `runDigest()`:
+  1. Calls `NewsService.fetchAiStories()` → candidates
+  2. If no candidates → log + skip (no message to group)
+  3. Calls `NewsDigestService.generateDigest(candidates)` → formatted message string
+  4. If generation fails → log + skip (no message to group)
+  5. Sends formatted message to each JID in `NEWS_CHAT_IDS` via `whatsappService.sendMessage()`
+- [sendManualDigest(chatId)](file:///d:/dev/thegaminghub/wa-group-reminder/src/sheduler/TaskScheduler.ts#322-332) — public method called by `NewsCommand`; same pipeline but sends to one specific chat
+
+---
+
+### New Command
+
+#### [NEW] [NewsCommand.ts](file:///d:/dev/thegaminghub/wa-group-reminder/src/commands/NewsCommand.ts)
+
+Follows the same pattern as [TaskDigestCommand.ts](file:///d:/dev/thegaminghub/wa-group-reminder/src/commands/TaskDigestCommand.ts).
+
+```ts
+export class NewsCommand implements Command {
+  name = "news";
+  aliases = ["/news"];
+
+  async execute(context: MessageContext, services: ServiceContainer): Promise<void> {
+    const { newsScheduler } = await import("../sheduler/NewsScheduler.js");
+    await newsScheduler.sendManualDigest(context.chatId);
+  }
+}
+```
+
+- If no new articles are available (digest pipeline returns nothing), sends a configurable fallback:  
+  `_No new AI stories available right now. Try again later!_ 🤖`
+
+---
+
+### Modified Files
+
+#### [MODIFY] [app.ts](file:///d:/dev/thegaminghub/wa-group-reminder/src/app.ts)
+
+Add wiring for `NewsScheduler` — import singleton, start, stop on SIGINT/SIGTERM, call `setNewsWhatsappService`.
+
+```diff
++import { newsScheduler } from "./sheduler/NewsScheduler.js";
++import { setWhatsappService as setNewsWhatsappService } from "./sheduler/NewsScheduler.js";
+
+ await reminderScheduler.start();
+ await taskScheduler.start();
++await newsScheduler.start();
+
+ setReminderWhatsappService(whatsappService);
+ setTaskWhatsappService(whatsappService);
++setNewsWhatsappService(whatsappService);
+
+ process.on("SIGINT", async () => {
+   reminderScheduler.stop();
+   taskScheduler.stop();
++  newsScheduler.stop();
+```
+
+#### [MODIFY] [WhatsappService.ts](file:///d:/dev/thegaminghub/wa-group-reminder/src/service/WhatsappService.ts) *(command registration)*
+
+Register `NewsCommand` alongside the other commands (wherever existing commands like [TaskDigestCommand](file:///d:/dev/thegaminghub/wa-group-reminder/src/commands/TaskDigestCommand.ts#5-20) are registered).
+
+#### [MODIFY] [.env.example](file:///d:/dev/thegaminghub/wa-group-reminder/.env.example)
+
+```diff
++# News Digest Configuration
++# Comma-separated WhatsApp group JIDs to receive the daily AI news digest
++NEWS_CHAT_IDS=""
+```
+
+#### [MODIFY] [.env](file:///d:/dev/thegaminghub/wa-group-reminder/.env)
+
+Add `NEWS_CHAT_IDS` with actual group JIDs.
+
+---
+
+## Verification Plan
+
+> [!NOTE]
+> No automated tests exist in this project. Verification is fully manual.
+
+### Manual Verification
+
+1. **On-demand `/news` command**
+   - Start the bot locally: `npm run dev` (or `node dist/app.js` after `npm run build`)
+   - In the WhatsApp group, send: `/news`
+   - Expected: bot replies with a formatted AI digest (3–5 stories + Thought of the day)
+   - Check terminal logs for: `[info] Fetched X HN stories`, `[info] AI news digest sent to <chatId>`
+
+2. **Deduplication (seen-article cache)**
+   - Send `/news` a second time in the same session
+   - Expected: digest either shows different articles OR if all have been seen, bot replies with the fallback message  
+     `_No new AI stories available right now. Try again later!_ 🤖`
+   - Check logs for `[info] Skipping seen article: <url>`
+
+3. **Error handling (no message posted to group)**
+   - Temporarily set `GEMINI_API_KEY` to an invalid value, send `/news`
+   - Expected: bot does **not** post anything to the group; error is logged only
+   - Restore the API key afterwards
+
+4. **Scheduled automated digest**
+   - Temporarily change the schedule hour in `NewsScheduler.ts` to 1 minute from now (e.g., `rule.hour = currentHour; rule.minute = currentMinute + 1`)
+   - Restart the bot and wait ~1 minute
+   - Expected: digest is automatically posted to each JID in `NEWS_CHAT_IDS`
+   - Revert the schedule change after verification

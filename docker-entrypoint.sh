@@ -13,5 +13,5 @@ echo "🔄 Syncing database schema..."
 npx prisma db push --accept-data-loss
 
 # Start the application
-echo "🤖 Starting WhatsApp bot..."
+echo "Starting WhatsApp bot..."
 exec node dist/app.js
