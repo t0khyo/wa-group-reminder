@@ -1,9 +1,7 @@
-import * as schedule from "node-schedule";
 import logger from "../utils/logger.js";
 import { newsService } from "../service/NewsService.js";
 import { newsDigestService } from "../service/NewsDigestService.js";
 import { audioService } from "../service/AudioService.js";
-import { DEFAULT_TIMEZONE } from "../config/TimeZone.js";
 import { prisma } from "../lib/prisma.js";
 import { TaskStatus } from "../generated/prisma/client.js";
 
@@ -19,11 +17,9 @@ export function setWhatsappService(service: any): void {
 }
 
 /**
- * NewsScheduler - Manages scheduled AI news digest notifications
- * Sends news summaries at 8:00 AM daily
+ * NewsScheduler - Manages AI news digest for manual commands
  */
 export class NewsScheduler {
-    private dailyDigestJob: schedule.Job | null = null;
     private isProcessing: boolean = false; // Prevent concurrent executions
 
     constructor() {
@@ -34,48 +30,14 @@ export class NewsScheduler {
      * Start the scheduler
      */
     async start(): Promise<void> {
-        logger.info("🚀 Starting NewsScheduler...");
-
-        // Schedule daily digest at 8:00 AM (in configured timezone)
-        this.scheduleDailyDigest();
-
-        logger.info("✅ NewsScheduler started successfully");
+        logger.info("✅ NewsScheduler started");
     }
 
     /**
      * Stop the scheduler
      */
     stop(): void {
-        logger.info("Stopping NewsScheduler...");
-
-        if (this.dailyDigestJob) {
-            this.dailyDigestJob.cancel();
-            this.dailyDigestJob = null;
-        }
-
         logger.info("NewsScheduler stopped");
-    }
-
-    /**
-     * Schedule daily digest at 8:00 AM
-     */
-    private scheduleDailyDigest(): void {
-        try {
-            // Schedule for 8:00 AM every day
-            const rule = new schedule.RecurrenceRule();
-            rule.hour = 8;
-            rule.minute = 0;
-            rule.tz = DEFAULT_TIMEZONE;
-
-            this.dailyDigestJob = schedule.scheduleJob(rule, async () => {
-                logger.info(`Running daily AI news digest at 8:00 AM (${DEFAULT_TIMEZONE})...`);
-                await this.runDigest();
-            });
-
-            logger.info(`📰 Daily AI news digest scheduled for 8:00 AM daily (${DEFAULT_TIMEZONE})`);
-        } catch (error) {
-            logger.error("Error scheduling daily news digest:", error);
-        }
     }
 
     /**
@@ -206,13 +168,6 @@ export class NewsScheduler {
         } finally {
             this.isProcessing = false;
         }
-    }
-
-    /**
-     * Scheduled run - broadcasts to all subscribed groups (with audio)
-     */
-    private async runDigest(): Promise<void> {
-        await this.runPipeline(undefined, false, true);
     }
 
     /**
