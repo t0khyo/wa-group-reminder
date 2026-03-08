@@ -10,12 +10,15 @@ services:
       AI_MODEL: ${AI_MODEL:-gpt-5-nano}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GOOGLE_APPLICATION_CREDENTIALS: /app/keys/service-account.json
+      NEWS_TTS_SPEAKING_RATE: ${NEWS_TTS_SPEAKING_RATE:-1.05}
       TZ: Asia/Kuwait
       LOG_LEVEL: ${LOG_LEVEL:-info}
       NODE_ENV: production
     volumes:
       - auth-data:/app/auth_info
-      - logs-data:/app/logs
+      - logs-data:/app/log
+      - /opt/gigi-keys/gen-lang-client-0265967902-2b4f8c09a2a2.json:/app/keys/service-account.json:ro
     networks:
       - dokploy-network
     healthcheck:

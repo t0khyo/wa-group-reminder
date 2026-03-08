@@ -1,9 +1,22 @@
 import logger from "../utils/logger.js";
+import * as cheerio from "cheerio";
 
 export interface HackerNewsStory {
     id: number;
     title: string;
     url: string;
+    score: number;
+    descendants: number; // comment count
+}
+
+export interface EnrichedArticle {
+    id: number;
+    title: string;
+    url: string;
+    score: number;
+    descendants: number;
+    body: string;
+    source: "article" | "hn_comments";
 }
 
 export class NewsService {
@@ -94,15 +107,162 @@ export class NewsService {
 
         // Trim cache if it exceeds max size
         if (this.seenArticleUrls.size > this.MAX_CACHE_SIZE) {
-            // Convert to array, keep only the most recent ones (the ones added last), convert back to Set
-            // Note: Sets iterate in insertion order
             const urlsArray = Array.from(this.seenArticleUrls);
             const itemsToRemove = urlsArray.length - this.MAX_CACHE_SIZE;
-
-            // Create new set with only the most recent MAX_CACHE_SIZE items
             this.seenArticleUrls = new Set(urlsArray.slice(itemsToRemove));
-
             logger.debug(`Trimmed seen articles cache by ${itemsToRemove} items. New size: ${this.seenArticleUrls.size}`);
+        }
+    }
+
+    /**
+     * Enriches selected articles by fetching their full content.
+     * Falls back to HN comments if article body is paywalled or too short.
+     * Drops articles where both fetch and comment fallback fail, promoting next candidate.
+     */
+    async enrichArticles(stories: HackerNewsStory[], maxArticles: number = 5): Promise<EnrichedArticle[]> {
+        const enriched: EnrichedArticle[] = [];
+
+        // Process in parallel
+        const results = await Promise.allSettled(
+            stories.map(story => this.enrichSingleArticle(story))
+        );
+
+        for (const result of results) {
+            if (enriched.length >= maxArticles) break;
+            if (result.status === "fulfilled" && result.value !== null) {
+                enriched.push(result.value);
+            }
+        }
+
+        logger.info(`Successfully enriched ${enriched.length}/${stories.length} articles`);
+        return enriched;
+    }
+
+    /**
+     * Enriches a single article with content
+     */
+    private async enrichSingleArticle(story: HackerNewsStory): Promise<EnrichedArticle | null> {
+        try {
+            // Try fetching article HTML
+            const body = await this.fetchArticleBody(story.url);
+
+            if (body && body.length >= 200) {
+                return {
+                    ...story,
+                    body,
+                    source: "article"
+                };
+            }
+
+            // Paywall fallback: fetch HN comments
+            logger.info(`Article body too short for "${story.title}", falling back to HN comments`);
+            const commentsBody = await this.fetchHnComments(story.id, 5);
+
+            if (commentsBody && commentsBody.length > 0) {
+                return {
+                    ...story,
+                    body: commentsBody,
+                    source: "hn_comments"
+                };
+            }
+
+            logger.warn(`Both article fetch and HN comments failed for "${story.title}". Dropping.`);
+            return null;
+        } catch (error) {
+            logger.error(`Failed to enrich article "${story.title}":`, {
+                error: error instanceof Error ? error.message : String(error)
+            });
+            return null;
+        }
+    }
+
+    /**
+     * Fetches article HTML and strips to plain text using cheerio
+     */
+    private async fetchArticleBody(url: string): Promise<string | null> {
+        try {
+            const response = await fetch(url, {
+                headers: {
+                    "User-Agent": "Mozilla/5.0 (compatible; NewsBot/1.0)",
+                    "Accept": "text/html"
+                },
+                signal: AbortSignal.timeout(10000) // 10s timeout
+            });
+
+            if (!response.ok) return null;
+
+            const html = await response.text();
+            const $ = cheerio.load(html);
+
+            // Remove scripts, styles, nav, footer, and other non-content elements
+            $("script, style, nav, footer, header, aside, iframe, noscript, .ad, .advertisement").remove();
+
+            // Try to find main content areas first
+            let text = "";
+            const contentSelectors = ["article", "main", "[role='main']", ".post-content", ".article-body", ".entry-content"];
+            for (const selector of contentSelectors) {
+                const content = $(selector).text();
+                if (content && content.trim().length > 200) {
+                    text = content;
+                    break;
+                }
+            }
+
+            // Fall back to body text
+            if (!text || text.trim().length < 200) {
+                text = $("body").text();
+            }
+
+            // Clean up whitespace
+            text = text.replace(/\s+/g, " ").trim();
+
+            // Truncate to ~3000 chars to keep Gemini context reasonable
+            if (text.length > 3000) {
+                text = text.substring(0, 3000) + "...";
+            }
+
+            return text;
+        } catch (error) {
+            logger.debug(`Failed to fetch article body from ${url}: ${error instanceof Error ? error.message : String(error)}`);
+            return null;
+        }
+    }
+
+    /**
+     * Fetches top N HN comments for a story as fallback body text
+     */
+    private async fetchHnComments(storyId: number, limit: number): Promise<string | null> {
+        try {
+            const response = await fetch(`${this.HN_ITEM_URL_BASE}${storyId}.json`);
+            if (!response.ok) return null;
+
+            const item = await response.json();
+            const commentIds: number[] = item.kids?.slice(0, limit) || [];
+
+            if (commentIds.length === 0) return null;
+
+            const commentPromises = commentIds.map(async (id) => {
+                try {
+                    const res = await fetch(`${this.HN_ITEM_URL_BASE}${id}.json`);
+                    if (!res.ok) return null;
+                    const comment = await res.json();
+                    if (!comment || comment.deleted || comment.dead || !comment.text) return null;
+                    // Strip HTML from HN comment text
+                    const $ = cheerio.load(`<div>${comment.text}</div>`);
+                    return $("div").text().trim();
+                } catch {
+                    return null;
+                }
+            });
+
+            const comments = (await Promise.all(commentPromises)).filter((c): c is string => c !== null);
+
+            if (comments.length === 0) return null;
+
+            return comments.join("\n\n---\n\n");
+        } catch (error) {
+            logger.debug(`Failed to fetch HN comments for story ${storyId}`);
+            return null;
         }
     }
 
@@ -123,7 +283,9 @@ export class NewsService {
                 return {
                     id: item.id,
                     title: item.title,
-                    url: item.url
+                    url: item.url,
+                    score: item.score || 0,
+                    descendants: item.descendants || 0
                 };
             }
 

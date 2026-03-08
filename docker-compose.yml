@@ -21,6 +21,10 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
 
+      # Audio Podcast (Google Cloud TTS)
+      GOOGLE_APPLICATION_CREDENTIALS: /app/keys/service-account.json
+      NEWS_TTS_SPEAKING_RATE: ${NEWS_TTS_SPEAKING_RATE:-1.05}
+
       # Timezone - Set container timezone to match application timezone
       TZ: Asia/Kuwait
 
@@ -34,8 +38,10 @@ services:
       - auth-data:/app/auth_info
       # Persist logs - using named volume to avoid permission issues with non-root user
       - logs-data:/app/logs
+      # Mount local Google Cloud credentials file for TTS
+      - ./keys/gen-lang-client-0265967902-2b4f8c09a2a2.json:/app/keys/service-account.json:ro
     healthcheck:
-      test: ["CMD", "node", "-e", "process.exit(0)"]
+      test: [ "CMD", "node", "-e", "process.exit(0)" ]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -54,7 +60,7 @@ services:
     volumes:
       - db-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d gigi_db"]
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d gigi_db" ]
       interval: 5s
       timeout: 5s
       retries: 10

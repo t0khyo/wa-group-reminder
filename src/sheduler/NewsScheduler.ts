@@ -2,6 +2,7 @@ import * as schedule from "node-schedule";
 import logger from "../utils/logger.js";
 import { newsService } from "../service/NewsService.js";
 import { newsDigestService } from "../service/NewsDigestService.js";
+import { audioService } from "../service/AudioService.js";
 import { DEFAULT_TIMEZONE } from "../config/TimeZone.js";
 import { prisma } from "../lib/prisma.js";
 import { TaskStatus } from "../generated/prisma/client.js";
@@ -78,12 +79,13 @@ export class NewsScheduler {
     }
 
     /**
-     * Orchestrates fetching, formatting, and broadcasting the digest
+     * Orchestrates fetching, formatting, and broadcasting the digest + audio
      * @param specificChatId Optional: if provided, only sends to this chat (used for manual command)
      * @param isManual Optional: if true, bypasses the seen-articles cache
+     * @param withAudio Optional: if true, also generates and sends podcast audio
      * @returns The generated digest text, or null if nothing was generated
      */
-    private async runPipeline(specificChatId?: string, isManual: boolean = false): Promise<string | null> {
+    private async runPipeline(specificChatId?: string, isManual: boolean = false, withAudio: boolean = true): Promise<string | null> {
         if (this.isProcessing) {
             logger.warn("News digest pipeline is already running. Skipping.");
             return null;
@@ -101,36 +103,84 @@ export class NewsScheduler {
                 return null;
             }
 
-            // 2. Generate summary with Gemini
-            logger.info(`Generating digest for ${candidates.length} stories...`);
-            digest = await newsDigestService.generateDigest(candidates);
+            // 2. Enrich articles with full content (for podcast generation)
+            const enrichedArticles = await newsService.enrichArticles(candidates);
+
+            // 3. Generate digest (+ podcast script if we have enough enriched articles)
+            let podcastAudioPath: string | null = null;
+
+            if (enrichedArticles.length >= 2 && withAudio) {
+                // Use the combined generation (text digest + podcast script)
+                logger.info(`Generating digest + podcast script for ${enrichedArticles.length} enriched articles...`);
+                const result = await newsDigestService.generateDigestWithPodcast(enrichedArticles);
+
+                if (result) {
+                    digest = result.digest;
+
+                    // Generate audio if we have segments and audio service is available
+                    if (result.segments.length > 0 && audioService.isAvailable()) {
+                        try {
+                            logger.info(`Generating podcast audio from ${result.segments.length} segments...`);
+                            podcastAudioPath = await audioService.generatePodcastAudio(result.segments);
+                        } catch (audioErr) {
+                            logger.error("Audio generation failed (text digest will still be sent):", {
+                                error: audioErr instanceof Error ? audioErr.message : String(audioErr)
+                            });
+                            // Audio failure never blocks text digest
+                        }
+                    } else if (!audioService.isAvailable()) {
+                        logger.info("Audio service not available. Skipping podcast audio.");
+                    }
+                }
+            } else {
+                // Not enough enriched articles for podcast — generate text-only digest
+                if (enrichedArticles.length < 2) {
+                    logger.info(`Only ${enrichedArticles.length} enriched article(s). Skipping audio, generating text-only digest.`);
+                }
+                digest = await newsDigestService.generateDigest(candidates);
+            }
 
             if (!digest) {
                 logger.error("Failed to generate AI news digest. Skipping broadcast.");
                 return null;
             }
 
-            // 3. Optional: add a tiny delay to ensure formatting is clean before sending
+            // 4. Check WhatsApp service
             if (!whatsappService) {
                 logger.warn("WhatsApp service not connected to NewsScheduler. Skipping broadcast.");
+                if (podcastAudioPath) audioService.cleanupFile(podcastAudioPath);
                 return digest;
             }
 
-            // 4. Send to chats
+            // 5. Determine target chats
             const targetChats = specificChatId
                 ? [specificChatId]
                 : await this.getSubscribedChats();
 
             if (targetChats.length === 0) {
                 logger.info("No subscribed chats found for news digest.");
+                if (podcastAudioPath) audioService.cleanupFile(podcastAudioPath);
                 return digest;
             }
 
+            // 6. Broadcast to chats: text first, then audio
             logger.info(`Broadcasting AI news digest to ${targetChats.length} chat(s)...`);
 
             for (const chatId of targetChats) {
                 try {
+                    // Send text digest first
                     await whatsappService.sendMessage(chatId, { text: digest });
+
+                    // Send audio immediately after (if available)
+                    if (podcastAudioPath) {
+                        try {
+                            await whatsappService.sendAudioAsVoice(chatId, podcastAudioPath);
+                        } catch (audioSendErr) {
+                            logger.error(`Failed to send podcast audio to chat ${chatId}:`, audioSendErr);
+                            // Don't fail the whole loop because of audio
+                        }
+                    }
+
                     // Add a small delay between messages to avoid rate limits
                     if (targetChats.length > 1) {
                         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -140,8 +190,12 @@ export class NewsScheduler {
                 }
             }
 
-            // 5. Mark as seen only after successful generation and (attempted) sending
-            // (Even if manually triggered, we add them to cache so the automated run won't repeat them)
+            // 7. Cleanup audio file after all sends
+            if (podcastAudioPath) {
+                audioService.cleanupFile(podcastAudioPath);
+            }
+
+            // 8. Mark as seen only after successful generation and (attempted) sending
             newsService.markStoriesAsSeen(candidates);
 
             return digest;
@@ -155,10 +209,10 @@ export class NewsScheduler {
     }
 
     /**
-     * Scheduled run - broadcasts to all subscribed groups
+     * Scheduled run - broadcasts to all subscribed groups (with audio)
      */
     private async runDigest(): Promise<void> {
-        await this.runPipeline();
+        await this.runPipeline(undefined, false, true);
     }
 
     /**
@@ -188,11 +242,19 @@ export class NewsScheduler {
     }
 
     /**
-     * Manually trigger a news digest for a specific chat
+     * Manually trigger a text-only news digest for a specific chat (existing /news command)
      */
     async sendManualDigest(chatId: string): Promise<string | null> {
         logger.info(`Manually triggering AI news digest for chat ${chatId}`);
-        return await this.runPipeline(chatId, true);
+        return await this.runPipeline(chatId, true, false);
+    }
+
+    /**
+     * Manually trigger a news digest WITH podcast audio for a specific chat (/read-news command)
+     */
+    async sendManualDigestWithAudio(chatId: string): Promise<string | null> {
+        logger.info(`Manually triggering AI news digest WITH audio for chat ${chatId}`);
+        return await this.runPipeline(chatId, true, true);
     }
 }
 

@@ -29,8 +29,8 @@ FROM node:24-alpine
 
 WORKDIR /app
 
-# Install dumb-init for proper signal handling
-RUN apk add --no-cache dumb-init
+# Install dumb-init for proper signal handling and ffmpeg for audio processing
+RUN apk add --no-cache dumb-init ffmpeg
 
 # Copy package files
 COPY package*.json ./
@@ -52,11 +52,11 @@ RUN chmod +x docker-entrypoint.sh
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
+  adduser -S nodejs -u 1001
 
 # Create directories with proper permissions
 RUN mkdir -p /app/auth_info /app/logs && \
-    chown -R nodejs:nodejs /app
+  chown -R nodejs:nodejs /app
 
 # Switch to non-root user
 USER nodejs

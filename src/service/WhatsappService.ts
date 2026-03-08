@@ -25,6 +25,7 @@ import { RecentRemindersCommand } from "../commands/RecentRemindersCommand.js";
 import { ClearHistoryCommand } from "../commands/ClearHistoryCommand.js";
 import { TaskDigestCommand } from "../commands/TaskDigestCommand.js";
 import { NewsCommand } from "../commands/NewsCommand.js";
+import { ReadNewsCommand } from "../commands/ReadNewsCommand.js";
 import { DoneTaskCommand } from "../commands/DoneTaskCommand.js";
 import { QuickCancelReminderCommand } from "../commands/QuickCancelReminderCommand.js";
 import { SearchTasksCommand } from "../commands/SearchTasksCommand.js";
@@ -65,6 +66,7 @@ export class WhatsappService {
     this.commandRegistry.register(new RecentRemindersCommand());
     this.commandRegistry.register(new TaskDigestCommand());
     this.commandRegistry.register(new NewsCommand());
+    this.commandRegistry.register(new ReadNewsCommand());
     this.commandRegistry.register(new ClearHistoryCommand());
     this.commandRegistry.register(new DoneTaskCommand());
     this.commandRegistry.register(new QuickCancelReminderCommand());
@@ -637,6 +639,35 @@ export class WhatsappService {
       return await this.socket.sendMessage(chatId, content);
     } catch (error) {
       logger.error(`Failed to send message to ${chatId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Send an audio file as a WhatsApp voice note (PTT)
+   */
+  async sendAudioAsVoice(chatId: string, audioPath: string): Promise<void> {
+    if (!this.socket) {
+      throw new Error("WhatsApp socket not initialized");
+    }
+
+    if (!this.isConnected) {
+      throw new Error("WhatsApp not connected");
+    }
+
+    try {
+      const { default: fs } = await import("fs");
+      const audioBuffer = fs.readFileSync(audioPath);
+
+      await this.socket.sendMessage(chatId, {
+        audio: audioBuffer,
+        mimetype: "audio/ogg; codecs=opus",
+        ptt: true, // Push-to-talk = voice note
+      });
+
+      logger.info(`Sent voice message to ${chatId}`);
+    } catch (error) {
+      logger.error(`Failed to send voice message to ${chatId}:`, error);
       throw error;
     }
   }
