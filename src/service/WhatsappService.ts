@@ -298,6 +298,22 @@ export class WhatsappService {
       return;
     }
 
+    const chatId = msg.key.remoteJid || "";
+    const senderId = msg.key.participant || chatId;
+
+    // Ignore WhatsApp statuses and channels/newsletters to prevent log noise
+    if (chatId === "status@broadcast" || chatId.endsWith("@newsletter")) {
+      return;
+    }
+
+    // Explicitly ignore messages sent by the bot acting as itself (handles edge cases where fromMe is false)
+    if (
+      senderId === this.botIdentity.jid ||
+      senderId === this.botIdentity.lid
+    ) {
+      return;
+    }
+
     // Skip old messages (only process messages from the last 2 minutes)
     const messageTimestamp = msg.messageTimestamp as number;
     const currentTime = Math.floor(Date.now() / 1000);
