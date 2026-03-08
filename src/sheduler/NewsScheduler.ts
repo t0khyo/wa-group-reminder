@@ -80,9 +80,10 @@ export class NewsScheduler {
     /**
      * Orchestrates fetching, formatting, and broadcasting the digest
      * @param specificChatId Optional: if provided, only sends to this chat (used for manual command)
+     * @param isManual Optional: if true, bypasses the seen-articles cache
      * @returns The generated digest text, or null if nothing was generated
      */
-    private async runPipeline(specificChatId?: string): Promise<string | null> {
+    private async runPipeline(specificChatId?: string, isManual: boolean = false): Promise<string | null> {
         if (this.isProcessing) {
             logger.warn("News digest pipeline is already running. Skipping.");
             return null;
@@ -92,8 +93,8 @@ export class NewsScheduler {
         let digest: string | null = null;
 
         try {
-            // 1. Fetch filtered candidates
-            const candidates = await newsService.fetchAiStories();
+            // 1. Fetch filtered candidates (bypass cache if manual)
+            const candidates = await newsService.fetchAiStories(isManual);
 
             if (candidates.length === 0) {
                 logger.info("No new AI stories found today. Skipping digest generation.");
@@ -140,6 +141,7 @@ export class NewsScheduler {
             }
 
             // 5. Mark as seen only after successful generation and (attempted) sending
+            // (Even if manually triggered, we add them to cache so the automated run won't repeat them)
             newsService.markStoriesAsSeen(candidates);
 
             return digest;
@@ -190,7 +192,7 @@ export class NewsScheduler {
      */
     async sendManualDigest(chatId: string): Promise<string | null> {
         logger.info(`Manually triggering AI news digest for chat ${chatId}`);
-        return await this.runPipeline(chatId);
+        return await this.runPipeline(chatId, true);
     }
 }
 

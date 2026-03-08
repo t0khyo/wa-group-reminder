@@ -27,9 +27,9 @@ export class NewsService {
 
     /**
      * Fetches the top 30 stories from Hacker News, filters them for AI content,
-     * excludes already seen articles, and returns up to 8 candidates.
+     * excludes already seen articles (unless skipCache is true), and returns up to 8 candidates.
      */
-    async fetchAiStories(): Promise<HackerNewsStory[]> {
+    async fetchAiStories(skipCache: boolean = false): Promise<HackerNewsStory[]> {
         try {
             logger.info("Fetching top stories from Hacker News...");
 
@@ -55,8 +55,8 @@ export class NewsService {
                     break;
                 }
 
-                // Skip if we've seen this URL before
-                if (story.url && this.seenArticleUrls.has(story.url)) {
+                // Skip if we've seen this URL before (and we're not bypassing the cache)
+                if (!skipCache && story.url && this.seenArticleUrls.has(story.url)) {
                     logger.debug(`Skipping seen article: ${story.url}`);
                     continue;
                 }
